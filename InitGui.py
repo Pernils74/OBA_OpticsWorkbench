@@ -33,7 +33,7 @@ class OBA_Optics(Gui.Workbench):
     def get_module_dir():
         if "__file__" in globals() and globals()["__file__"]:
             return os.path.dirname(os.path.abspath(__file__))
-        return os.path.join(App.getUserAppDataDir(), "Mod", "sa_optics")
+        return os.path.join(App.getUserAppDataDir(), "Mod", "OBA_OpticsWorkbench")
 
     def Initialize(self):
         import hot_reload  # 🔥 lokal import (viktig!)
