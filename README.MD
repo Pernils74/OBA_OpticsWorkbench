@@ -13,7 +13,7 @@
     Typical location on Windows:
 
     ```
-    C:\Users\<username>\AppData\Roaming\FreeCAD\Mod\
+    C:\Users\<username>\AppData\Roaming\FreeCAD\v1-1\Mod\OBA_OpticsWorkbench\
     ```
 
 ## 🧩 Surface‑based optics (ShapeBinders)
