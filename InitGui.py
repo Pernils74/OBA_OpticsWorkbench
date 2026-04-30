@@ -11,7 +11,7 @@ from PySide import QtCore
 #     if "__file__" in globals() and globals()["__file__"]:
 #         return os.path.dirname(os.path.abspath(__file__))
 #     # fallback om __file__ saknas (t.ex. makro-läge)
-#     return os.path.join(App.getUserAppDataDir(), "Mod", "sa_optics")
+#     return os.path.join(App.getUserAppDataDir(), "Mod", "OBA_OpticsWorkbench")
 
 
 # def initialize_icons():
