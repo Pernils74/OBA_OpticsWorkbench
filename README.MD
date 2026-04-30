@@ -22,11 +22,8 @@ https://github.com/chbergmann/OpticsWorkbench
     Typical location on Windows:
 
     ```
-<<<<<<< HEAD
-    C:\Users\<username>\AppData\Roaming\FreeCAD\Mod\OBA_OpticsWorkbench
-=======
     C:\Users\<username>\AppData\Roaming\FreeCAD\v1-1\Mod\OBA_OpticsWorkbench\
->>>>>>> 629f72860c27d60e2b41e51f31e2ba834d03ed4c
+
     ```
 
 ## 🧩 Surface‑based optics (ShapeBinders)
