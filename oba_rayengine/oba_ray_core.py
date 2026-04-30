@@ -7,9 +7,14 @@ import math
 
 
 class OBARay:
-    def __init__(self, start_point, direction, wavelength=550.0, power=1.0, emitter_id=None, bounce_count=0, mode="final", parent_id=None, medium_stack=None):
+    def __init__(self, start_point, direction, wavelength=550.0, power=1.0, emitter_id=None, bounce_count=0, mode="final", parent_id=None, medium_stack=None, path_id=None):
         self.id = uuid.uuid4()  # Unikt ID för varje strål-segment/gren
         self.parent_id = parent_id  # Koppling till ursprungsstrålen
+
+        if path_id is None:
+            self.path_id = self.id  # root-ray
+        else:
+            self.path_id = path_id
 
         self.points = [start_point]  # Lista med App.Vector
         self.direction = direction.normalize()
@@ -121,6 +126,8 @@ class OBARay:
 
     # -----------------------------
     # BRANCHING (NY!)
+    # parent_id   vilken händelse skapade mig
+    # path_id     vilken fysisk stråle tillhör jag?
     # -----------------------------
     def spawn_child(self, direction, power, offset, wavelength=None, extra=None):
         """
@@ -138,7 +145,8 @@ class OBARay:
             emitter_id=self.emitter_id,
             bounce_count=self.bounce_count + 1,  # Behåll index för samma interaktion
             mode=self.mode,
-            parent_id=self.id,
+            parent_id=self.id,  # vilken händelse skapade mig
+            path_id=self.path_id,  # Ärver path_id så att alla i samma "gren" har samma path_id. vilken fysisk stråle tillhör jag?
             medium_stack=self.medium_stack,  # 🔥 ÄRVER STACKEN
         )
 
@@ -400,6 +408,121 @@ class OBARayManager:
             self._coin_root.addChild(self._normal_preview_node)
 
     def visualize(self, bounce_min=None, bounce_max=None, line_width=2.0, color_by_bounce=False, mode="final"):
+
+        print("ritar mode:", mode)
+
+        # ============================================================
+        # 1. ENSURE ROOT EXISTS
+        # ============================================================
+        self._ensure_coin_layers()
+
+        # ============================================================
+        # 2. SELECT TARGET NODE
+        # ============================================================
+        target_node = self._preview_node if mode == "preview" else self._final_node
+
+        # ============================================================
+        # 3. CLEAR
+        # ============================================================
+        target_node.removeAllChildren()
+
+        # ============================================================
+        # 4. DATA PREP
+        # ============================================================
+        if bounce_max == -1:
+            bounce_max = None
+
+        max_bounce_in_data = max((r.bounce_count for r in self.rays), default=0)
+
+        # ============================================================
+        # 5. STYLE
+        # ============================================================
+        draw_style = coin.SoDrawStyle()
+        draw_style.lineWidth.setValue(line_width)
+        target_node.addChild(draw_style)
+
+        # ============================================================
+        # 6. COLLECT ALL DATA (🔥 KEY OPTIMIZATION)
+        # ============================================================
+        all_coords = []
+        num_vertices = []
+        colors = []
+
+        valid = 0
+
+        for ray in self.rays:
+
+            if ray.mode != mode:
+                continue
+
+            if bounce_min is not None and ray.bounce_count < bounce_min:
+                continue
+            if bounce_max is not None and ray.bounce_count > bounce_max:
+                continue
+
+            pts = ray.points
+            if len(pts) < 2:
+                continue
+
+            valid += 1
+
+            # --- samla koordinater ---
+            for p in pts:
+                all_coords.append((p.x, p.y, p.z))
+
+            num_vertices.append(len(pts))
+
+            # --- färg ---
+            if color_by_bounce:
+                r, g, b = self._bounce_to_rgb(ray.bounce_count, bounce_min or 0, max_bounce_in_data)
+            else:
+                r, g, b = self._wavelength_to_rgb(ray.wavelength)
+
+            colors.append((r, g, b))
+
+        print("VALID RAYS:", valid)
+
+        if not all_coords:
+            self._coin_root.touch()
+            gui.updateGui()
+            return
+
+        # ============================================================
+        # 7. BUILD SINGLE COIN GRAPH (🔥 HUGE SPEEDUP)
+        # ============================================================
+        root_sep = coin.SoSeparator()
+
+        # --- Material ---
+        mat = coin.SoMaterial()
+        mat.diffuseColor.setValues(0, len(colors), colors)
+        root_sep.addChild(mat)
+
+        # --- Bind per ray ---
+        binding = coin.SoMaterialBinding()
+        binding.value = coin.SoMaterialBinding.PER_PART
+        root_sep.addChild(binding)
+
+        # --- Coordinates ---
+        coords = coin.SoCoordinate3()
+        coords.point.setValues(0, len(all_coords), all_coords)
+        root_sep.addChild(coords)
+
+        # --- LineSet ---
+        line = coin.SoLineSet()
+        line.numVertices.setValues(0, len(num_vertices), num_vertices)
+        root_sep.addChild(line)
+
+        target_node.addChild(root_sep)
+
+        # ============================================================
+        # 8. REFRESH
+        # ============================================================
+        self._coin_root.touch()
+        gui.updateGui()
+
+        self._notify()  # ✅ Trigger för notify listeners
+
+    def visualize_old(self, bounce_min=None, bounce_max=None, line_width=2.0, color_by_bounce=False, mode="final"):
         print("ritar mode: ", mode)
 
         # view = gui.activeDocument().activeView()

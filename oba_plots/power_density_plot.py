@@ -1,13 +1,8 @@
 # -*- coding: utf-8 -*-
 # power_density_plot.py
 
-import os
 import FreeCADGui as Gui
-from PySide import QtWidgets, QtCore, QtGui
-
-import matplotlib
-
-matplotlib.rcParams["font.family"] = "DejaVu Sans"
+from PySide import QtWidgets, QtCore
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
@@ -15,16 +10,13 @@ from scipy.ndimage import gaussian_filter
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5 import NavigationToolbar2QT as NavigationToolbar
-from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
-from oba_rayengine.oba_ray_core import OBARayManager
-from oba_rayengine.oba_ray_analyser import collect_ray_hits_and_stats
-from .show_xyz_live_list import OBA_ShowXYZLiveList
-from .filter_panel import ClusterHitFilterPanel
-
-ICON_DIR = os.path.join(os.path.dirname(__file__), "..", "icons")
+from raytracer.oba_ray import OBARayManager
+from raytracer.oba_ray_analyser import collect_ray_hits_and_stats
 
 
+# -------------------------------------------------
+# Helpers
 # -------------------------------------------------
 def project_point(pt, plane):
     x, y, z = pt
@@ -37,7 +29,19 @@ def project_point(pt, plane):
     raise ValueError(plane)
 
 
-def compute_power_density(hits, filter_spec, plane, bins, quantity):
+def normalize_filter_spec(filter_spec, hits):
+    spec = filter_spec or {}
+
+    if not spec.get("emitters"):
+        spec["emitters"] = tuple({h["emitter_id"] for h in hits})
+
+    if not spec.get("objects"):
+        spec["objects"] = tuple({h["object"] for h in hits})
+
+    return spec
+
+
+def compute_power_density(hits, filter_spec, plane, bins):
     xs, ys, ws = [], [], []
 
     for h in hits:
@@ -46,29 +50,31 @@ def compute_power_density(hits, filter_spec, plane, bins, quantity):
         if h["object"] not in filter_spec["objects"]:
             continue
 
-        val = h.get(quantity)
-        if val is None:
-            continue
-
         x, y = project_point(h["point"], plane)
         xs.append(x)
         ys.append(y)
-        ws.append(val)
+        ws.append(h["power"])
 
     if not xs:
         return None, None, None
 
-    return np.histogram2d(xs, ys, bins=bins, weights=ws)
+    H, xedges, yedges = np.histogram2d(xs, ys, bins=bins, weights=ws)
+    return H, xedges, yedges
 
 
+# -------------------------------------------------
+# Dialog
 # -------------------------------------------------
 class PowerDensityPlotDialog(QtWidgets.QDialog):
 
     def __init__(self):
         super().__init__(Gui.getMainWindow())
 
-        self.setWindowTitle("Ray Power Density Plot")
-        self.resize(1150, 900)
+        self.setWindowTitle("Plot Ray Power Density")
+        self.resize(1100, 900)
+
+        self._filter_spec = {}
+        self._mapping = {}
 
         self._init_ui()
 
@@ -79,9 +85,7 @@ class PowerDensityPlotDialog(QtWidgets.QDialog):
     def _init_ui(self):
         root = QtWidgets.QVBoxLayout(self)
 
-        # -------------------------------------------------
-        # Top controls
-        # -------------------------------------------------
+        # ---------------- Top controls ----------------
         top = QtWidgets.QHBoxLayout()
         root.addLayout(top)
 
@@ -93,12 +97,6 @@ class PowerDensityPlotDialog(QtWidgets.QDialog):
         self.cmbPlane = QtWidgets.QComboBox()
         self.cmbPlane.addItems(["XY", "XZ", "YZ"])
         top.addWidget(self.cmbPlane)
-
-        top.addWidget(QtWidgets.QLabel("Power:"))
-        self.cmbQuantity = QtWidgets.QComboBox()
-        self.cmbQuantity.addItem("Power In", userData="power_in")
-        self.cmbQuantity.addItem("Power Out", userData="power_out")
-        top.addWidget(self.cmbQuantity)
 
         top.addWidget(QtWidgets.QLabel("Bins:"))
         self.spnBins = QtWidgets.QSpinBox()
@@ -124,93 +122,118 @@ class PowerDensityPlotDialog(QtWidgets.QDialog):
 
         top.addStretch(1)
 
+        # 🔽 Visa filter checkbox
         self.chkShowFilter = QtWidgets.QCheckBox("Show Filter")
         self.chkShowFilter.setChecked(True)
+
+        self.chkShowFilter.stateChanged.connect(self._toggle_filter_panel)
         top.addWidget(self.chkShowFilter)
 
-        self.chk3D = QtWidgets.QCheckBox("3D")
-        self.chk3D.setChecked(False)
-        self.chk3D.toggled.connect(self._update_plot_layout)
-        top.addWidget(self.chk3D)
-
-        self.btn_xyz_list = QtWidgets.QPushButton("XYZ list")
-        self.btn_xyz_list.setIcon(QtGui.QIcon(os.path.join(ICON_DIR, "xyz_list.svg")))
-        top.addWidget(self.btn_xyz_list)
-
-        # -------------------------------------------------
-        # Matplotlib canvases
-        # -------------------------------------------------
-        self.fig2d = Figure()
-        self.canvas2d = FigureCanvas(self.fig2d)
-        self.toolbar = NavigationToolbar(self.canvas2d, self)
-
-        self.fig3d = Figure()
-        self.canvas3d = FigureCanvas(self.fig3d)
-        self.canvas3d.setVisible(False)
+        # ---------------- Plot ----------------
+        self.fig = Figure()
+        self.canvas = FigureCanvas(self.fig)
+        self.toolbar = NavigationToolbar(self.canvas, self)
 
         root.addWidget(self.toolbar)
+        root.addWidget(self.canvas)
 
-        # -------------------------------------------------
-        # Horizontal splitter: 2D | 3D
-        # -------------------------------------------------
-        self.plotSplitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
-        self.plotSplitter.addWidget(self.canvas2d)
-        self.plotSplitter.addWidget(self.canvas3d)
-        self.plotSplitter.setStretchFactor(0, 1)
-        self.plotSplitter.setStretchFactor(1, 1)
+        # ---------------- Filter panel ----------------
+        self.filterPanel = QtWidgets.QWidget()
+        filterLayout = QtWidgets.QHBoxLayout(self.filterPanel)
 
-        # -------------------------------------------------
-        # Filter panel
-        # -------------------------------------------------
-        self.filterPanel = ClusterHitFilterPanel(self)
-        self.filterPanel.filter_changed.connect(self.reload_plot)
-        self.filterPanel.setMaximumHeight(220)
-        self.chkShowFilter.toggled.connect(self.filterPanel.setVisible)
+        # Emitters
+        emitterBox = QtWidgets.QVBoxLayout()
+        emitterBox.addWidget(QtWidgets.QLabel("<b>Emitters</b>"))
+        self.emitter_list = QtWidgets.QListWidget()
+        emitterBox.addWidget(self.emitter_list)
 
-        # -------------------------------------------------
-        # Vertical splitter: plots | filter
-        # -------------------------------------------------
-        mainSplitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
-        mainSplitter.addWidget(self.plotSplitter)
-        mainSplitter.addWidget(self.filterPanel)
-        mainSplitter.setStretchFactor(0, 1)
-        mainSplitter.setStretchFactor(1, 0)
+        # Objects
+        objectBox = QtWidgets.QVBoxLayout()
+        objectBox.addWidget(QtWidgets.QLabel("<b>Objects</b>"))
+        self.object_list = QtWidgets.QListWidget()
+        objectBox.addWidget(self.object_list)
 
-        root.addWidget(mainSplitter)
+        filterLayout.addLayout(emitterBox)
+        filterLayout.addLayout(objectBox)
 
-        # -------------------------------------------------
-        # Status
-        # -------------------------------------------------
+        root.addWidget(self.filterPanel)
+        self.filterPanel.setVisible(self.chkShowFilter.isChecked())
+
+        # ---------------- Status ----------------
         self.lblStatus = QtWidgets.QLabel("")
         root.addWidget(self.lblStatus)
 
-        # -------------------------------------------------
         # Signals
-        # -------------------------------------------------
-        # ComboBox
         self.cmbPlane.currentIndexChanged.connect(self.reload_plot)
-        self.cmbQuantity.currentIndexChanged.connect(self.reload_plot)
-
-        # SpinBoxes
         self.spnBins.valueChanged.connect(self.reload_plot)
         self.spnSigma.valueChanged.connect(self.reload_plot)
-
-        # CheckBoxes
         self.chkLog.stateChanged.connect(self.reload_plot)
         self.chkEqual.stateChanged.connect(self.reload_plot)
         self.chkGrid.stateChanged.connect(self.reload_plot)
 
-        self.btn_xyz_list.clicked.connect(self._open_xyz_list)
+    # -------------------------------------------------
+    def _toggle_filter_panel(self):
+        self.filterPanel.setVisible(self.chkShowFilter.isChecked())
 
     # -------------------------------------------------
-    def _update_plot_layout(self, enabled):
-        self.canvas3d.setVisible(enabled)
-        self.plotSplitter.setSizes([1, 1] if enabled else [1, 0])
+    def _populate_filters(self, hits):
+        self._mapping = OBARayManager().get_hit_mapping(mode="final")
+
+        emitters = sorted(self._mapping.keys())
+        objects = sorted({o for objs in self._mapping.values() for o in objs})
+
+        self.emitter_list.blockSignals(True)
+        self.object_list.blockSignals(True)
+
+        self.emitter_list.clear()
+        self.object_list.clear()
+
+        for e in emitters:
+            item = QtWidgets.QListWidgetItem(e)
+            item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable)
+            item.setCheckState(QtCore.Qt.Checked)
+            self.emitter_list.addItem(item)
+
+        for o in objects:
+            item = QtWidgets.QListWidgetItem(o)
+            item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable)
+            item.setCheckState(QtCore.Qt.Checked)
+            self.object_list.addItem(item)
+
+        self.emitter_list.blockSignals(False)
+        self.object_list.blockSignals(False)
+
+        self.emitter_list.itemChanged.connect(self._update_object_states)
+        self.object_list.itemChanged.connect(self.reload_plot)
+
+    # -------------------------------------------------
+    def _update_object_states(self):
+        selected_emitters = {self.emitter_list.item(i).text() for i in range(self.emitter_list.count()) if self.emitter_list.item(i).checkState() == QtCore.Qt.Checked}
+
+        # vilka objekt är giltiga?
+        valid_objects = set()
+        for e in selected_emitters:
+            valid_objects |= self._mapping.get(e, set())
+
+        for i in range(self.object_list.count()):
+            item = self.object_list.item(i)
+            obj = item.text()
+
+            # 🔑 Viktig logik
+            if obj in valid_objects:
+                item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable)
+            else:
+                item.setFlags(QtCore.Qt.NoItemFlags)
+
         self.reload_plot()
 
     # -------------------------------------------------
-    def _open_xyz_list(self):
-        OBA_ShowXYZLiveList(parent=self)
+    def _get_filter_spec(self):
+        emitters = tuple(self.emitter_list.item(i).text() for i in range(self.emitter_list.count()) if self.emitter_list.item(i).checkState() == QtCore.Qt.Checked)
+
+        objects = tuple(self.object_list.item(i).text() for i in range(self.object_list.count()) if self.object_list.item(i).checkState() == QtCore.Qt.Checked)
+
+        return {"emitters": emitters, "objects": objects}
 
     # -------------------------------------------------
     def on_rays_updated(self):
@@ -218,150 +241,59 @@ class PowerDensityPlotDialog(QtWidgets.QDialog):
 
     # -------------------------------------------------
     def reload_plot(self):
+
         hits, _ = collect_ray_hits_and_stats(mode="final")
 
-        if self.filterPanel.emitter_list.count() == 0:
-            self.filterPanel.set_mode("final")
+        self.fig.clear()
+        ax = self.fig.add_subplot(111)
 
-        filter_spec = self.filterPanel.get_filter_spec()
-        quantity = self.cmbQuantity.currentData()
+        if not hits:
+            ax.text(0.5, 0.5, "No ray hits", ha="center", va="center", transform=ax.transAxes)
+            self.canvas.draw_idle()
+            return
 
-        # ---------- 2D ----------
-        self.fig2d.clear()
-        ax2d = self.fig2d.add_subplot(111)
+        # init filter UI första gången
+        if self.emitter_list.count() == 0:
+            self._populate_filters(hits)
+
+        filter_spec = normalize_filter_spec(self._get_filter_spec(), hits)
 
         H, xedges, yedges = compute_power_density(
             hits,
             filter_spec,
             self.cmbPlane.currentText(),
             self.spnBins.value(),
-            quantity,
         )
 
-        if H is not None:
-            if self.spnSigma.value() > 0:
-                H = gaussian_filter(H, sigma=self.spnSigma.value())
-            if self.chkLog.isChecked():
-                H = np.log10(H + 1e-12)
-
-            im = ax2d.imshow(
-                H.T,
-                origin="lower",
-                extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]],
-                cmap="plasma",
-                aspect="equal" if self.chkEqual.isChecked() else "auto",
-            )
-            self.fig2d.colorbar(im, ax=ax2d)
-
-        self.canvas2d.draw_idle()
-
-        # ---------- 3D ----------
-        if self.chk3D.isChecked():
-            self._draw_3d_plot(hits, filter_spec)
-
-        total_power = sum(h.get(quantity) or 0.0 for h in hits)
-        self.lblStatus.setText(f"Hits: {len(hits)} | Σ Power: {total_power:.6g}")
-
-    # -------------------------------------------------
-
-    def _draw_3d_plot(self, hits, filter_spec):
-        self.fig3d.clear()
-        ax = self.fig3d.add_subplot(111, projection="3d")
-
-        # -------------------------------------------------
-        # Group hits by object
-        # -------------------------------------------------
-        hits_by_object = {}
-
-        for h in hits:
-            if h["emitter_id"] not in filter_spec["emitters"]:
-                continue
-            if h["object"] not in filter_spec["objects"]:
-                continue
-
-            hits_by_object.setdefault(h["object"], []).append(h)
-
-        if not hits_by_object:
-            self.canvas3d.draw_idle()
+        if H is None:
+            ax.text(0.5, 0.5, "No data after filtering", ha="center", va="center", transform=ax.transAxes)
+            self.canvas.draw_idle()
             return
 
-        # -------------------------------------------------
-        # Assign distinct colors
-        # -------------------------------------------------
-        cmap = matplotlib.cm.get_cmap("tab10")  # bra för diskreta kategorier
-        object_names = sorted(hits_by_object.keys())
-        color_map = {name: cmap(i % cmap.N) for i, name in enumerate(object_names)}
+        sigma = self.spnSigma.value()
+        if sigma > 0:
+            H = gaussian_filter(H, sigma=sigma)
 
-        # -------------------------------------------------
-        # Plot per object
-        # -------------------------------------------------
-        for obj_name, obj_hits in hits_by_object.items():
-            xs, ys, zs = [], [], []
+        if self.chkLog.isChecked():
+            H = np.log10(H + 1e-12)
 
-            for h in obj_hits:
-                x, y, z = h["point"]
-                xs.append(x)
-                ys.append(y)
-                zs.append(z)
+        im = ax.imshow(
+            H.T,
+            origin="lower",
+            extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]],
+            cmap="plasma",
+            aspect="equal" if self.chkEqual.isChecked() else "auto",
+        )
 
-            ax.scatter(
-                xs,
-                ys,
-                zs,
-                color=color_map[obj_name],
-                s=40,  # tydligare punkter
-                depthshade=True,
-                label=obj_name,  # 🔑 legend
-            )
+        self.fig.colorbar(im, ax=ax, label="Power density")
 
-        # -------------------------------------------------
-        # Axes & legend
-        # -------------------------------------------------
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        ax.set_zlabel("Z")
+        if self.chkGrid.isChecked():
+            ax.grid(True)
 
-        ax.legend(title="Object")
+        total_power = sum(h["power"] for h in hits)
+        self.lblStatus.setText(f"Hits: {len(hits)} | Total power: {total_power:.3f}")
 
-        self.canvas3d.draw_idle()
-
-        print(f"3D plot: {sum(len(v) for v in hits_by_object.values())} points | " f"objects={tuple(hits_by_object.keys())}")
-
-    def _draw_3d_plot_med_power(self, hits, filter_spec):
-        print("3D raw points:")
-        for h in hits:
-            print(h["point"])
-
-        self.fig3d.clear()
-        ax = self.fig3d.add_subplot(111, projection="3d")
-
-        xs, ys, zs, ps = [], [], [], []
-
-        for h in hits:
-            if h["emitter_id"] not in filter_spec["emitters"]:
-                continue
-            if h["object"] not in filter_spec["objects"]:
-                continue
-
-            x, y, z = h["point"]
-            xs.append(x)
-            ys.append(y)
-            zs.append(z)
-            ps.append(h.get("power_in", 0.0))
-
-        if xs:
-            sizes = [20 + 200 * p / max(ps) for p in ps]
-            # sc = ax.scatter(xs, ys, zs, c=ps, s=sizes, cmap="plasma")
-            sc = ax.scatter(xs, ys, zs, c=ps, cmap="plasma", s=4)
-            self.fig3d.colorbar(sc, ax=ax, shrink=0.6)
-
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        ax.set_zlabel("Z")
-
-        self.canvas3d.draw_idle()
-
-        print(f"3D plot: {len(xs)} points | " f"emitters={filter_spec['emitters']} | " f"objects={filter_spec['objects']}")
+        self.canvas.draw_idle()
 
     # -------------------------------------------------
     def closeEvent(self, event):
@@ -369,6 +301,8 @@ class PowerDensityPlotDialog(QtWidgets.QDialog):
         super().closeEvent(event)
 
 
+# -------------------------------------------------
+# FreeCAD Command
 # -------------------------------------------------
 def ShowPowerDensityPlotDialog():
     dlg = PowerDensityPlotDialog()

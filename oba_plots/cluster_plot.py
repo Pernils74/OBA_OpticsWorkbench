@@ -10,6 +10,8 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5 import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D  # noqa
+import numpy as np
+
 
 from .cluster_core import *
 from oba_rayengine.oba_ray_core import OBARayManager
@@ -215,7 +217,110 @@ class ClusterPlotDialog(QtWidgets.QDialog):
         self.lblStatus.setText(f"Hits: {len(hits)} | Emitters: {len(emitters)} | Objects: {len(objects)}")
 
     # -------------------------------------------------
+
     def _draw_3d_plot(self, hits, filter_spec):
+        self.fig3d.clear()
+        ax = self.fig3d.add_subplot(111, projection="3d")
+
+        # -------------------------------------------------
+        # Group hits by object (filtered)
+        # -------------------------------------------------
+        hits_by_object = {}
+
+        for h in hits:
+            if h["emitter_id"] not in filter_spec["emitters"]:
+                continue
+            if h["object"] not in filter_spec["objects"]:
+                continue
+            hits_by_object.setdefault(h["object"], []).append(h)
+
+        if not hits_by_object:
+            self.canvas3d.draw_idle()
+            return
+
+        # -------------------------------------------------
+        # Plot points + samla ALLA punkter
+        # -------------------------------------------------
+        cmap = matplotlib.cm.get_cmap("tab10")
+        all_xs, all_ys, all_zs = [], [], []
+
+        for i, (obj, obj_hits) in enumerate(sorted(hits_by_object.items())):
+            xs, ys, zs = zip(*(h["point"] for h in obj_hits))
+
+            all_xs.extend(xs)
+            all_ys.extend(ys)
+            all_zs.extend(zs)
+
+            ax.scatter(
+                xs,
+                ys,
+                zs,
+                color=cmap(i % cmap.N),
+                s=40,
+                depthshade=True,
+                label=obj,
+                zorder=2,
+            )
+
+        # -------------------------------------------------
+        # Reference plane (halvtransparent)
+        # -------------------------------------------------
+        if all_xs:
+
+            plane = self.cmbPlane.currentText()
+            n = 25
+
+            xmin, xmax = min(all_xs), max(all_xs)
+            ymin, ymax = min(all_ys), max(all_ys)
+            zmin, zmax = min(all_zs), max(all_zs)
+
+            if plane == "XY":
+                X, Y = np.meshgrid(
+                    np.linspace(xmin, xmax, n),
+                    np.linspace(ymin, ymax, n),
+                )
+                Z = np.zeros_like(X)
+
+            elif plane == "XZ":
+                X, Z = np.meshgrid(
+                    np.linspace(xmin, xmax, n),
+                    np.linspace(zmin, zmax, n),
+                )
+                Y = np.zeros_like(X)
+
+            elif plane == "YZ":
+                Y, Z = np.meshgrid(
+                    np.linspace(ymin, ymax, n),
+                    np.linspace(zmin, zmax, n),
+                )
+                X = np.zeros_like(Y)
+
+            else:
+                X = Y = Z = None
+
+            if X is not None:
+                ax.plot_surface(
+                    X,
+                    Y,
+                    Z,
+                    color="gray",
+                    alpha=0.25,
+                    linewidth=0,
+                    antialiased=True,
+                    zorder=0,
+                )
+
+        # -------------------------------------------------
+        # Axes & legend
+        # -------------------------------------------------
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Z")
+        ax.legend(title="Objects")
+
+        self.canvas3d.draw_idle()
+
+    def _draw_3d_plot_old(self, hits, filter_spec):
         self.fig3d.clear()
         ax = self.fig3d.add_subplot(111, projection="3d")
 

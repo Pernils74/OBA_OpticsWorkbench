@@ -2,18 +2,27 @@
 
 ### ... Its because it’s different, that’s why.
 
-    Before anything else, I want to give a shout‑out to **chbergmann** for the original **Optical Workbench**. That project has been the primary inspiration for this work and laid the foundation for many of the ideas developed further here.
+Before anything else, I want to give a shout‑out to **chbergmann** for the original **Optical Workbench**. That project has been the primary inspiration for this work and laid the foundation for many of the ideas developed further here.
 
-    The original Optical Workbench can be found here:
-    https://github.com/chbergmann/OpticsWorkbench
+The original Optical Workbench can be found here:
+https://github.com/chbergmann/OpticsWorkbench
+
+### Version 0.1
+
+#### Changelog
+
+- Added a semi‑transparent **reference (ghost) plane** to density and cluster plots to visually indicate the active projection plane.
+- Fixed performance issues causing slow redraws in the 3D view.
 
 ## 🔧 Installation
 
-    To install, copy the content into FreeCAD’s Mod folder.
+![screenshot](./examples/screenshot_github_download.png)
+
+    To install, unzip and copy the content into FreeCAD’s Mod folder.
     Typical location on Windows:
 
     ```
-    C:\Users\<username>\AppData\Roaming\FreeCAD\Mod\
+    C:\Users\<username>\AppData\Roaming\FreeCAD\Mod\OBA_OpticsWorkbench
     ```
 
 ## 🧩 Surface‑based optics (ShapeBinders)
