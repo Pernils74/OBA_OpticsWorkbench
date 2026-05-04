@@ -3,7 +3,6 @@ import FreeCAD as App
 import FreeCADGui as Gui
 from PySide import QtCore
 
-
 # --- fungerar i alla lägen ---
 
 
@@ -160,6 +159,14 @@ class OBA_Optics(Gui.Workbench):
             pixmap=get_icon("plot_power_density.svg"),
         )
 
+        hot_reload.register_command(
+            command="ShowPowerVsHitPlotDialog",
+            impl_module="oba_plots.power_vs_hit_plot",
+            menu="För att plotta power",
+            tooltip="Plotta cluster power",
+            pixmap=get_icon("plot_power_vs_hit.svg"),
+        )
+
         # --------------------------
         # ----- Examples   ------
         # --------------------------
@@ -234,6 +241,7 @@ class OBA_Optics(Gui.Workbench):
             SEP(),
             "ShowClusterPlotDialog",
             "ShowPowerDensityPlotDialog",
+            "ShowPowerVsHitPlotDialog",
             SEP(),
             "OBA_ShowBatchDialog",
             "OBA_ShowXYZLiveList",

@@ -372,6 +372,77 @@ class OBAElementProxy:
         _trigger_ray_engine(f"Property changed: {obj.Name}.{prop}", obj)
 
     def add_binders(self, obj, source_obj, sub_elements):
+        """
+        Lägg till ShapeBinders till det optiska objektet.
+
+        POLICY:
+        - Alla binders MÅSTE komma från samma källobjekt
+        - Första bindern definierar 'geometrisk ägare'
+        - Objektets Label uppdateras till <OpticalType>_<SourceName>
+        """
+
+        if not source_obj:
+            return
+
+        doc = obj.Document
+        if not doc:
+            return
+
+        # Resolva källobjekt
+        actual = doc.getObject(source_obj) if isinstance(source_obj, str) else source_obj
+        if not actual:
+            App.Console.PrintError("[OBA] Invalid source object for binder\n")
+            return
+
+        # --------------------------------------------------
+        # 🔒 KONSISTENSKONTROLL:
+        # tillåt inte binders från olika källor
+        # --------------------------------------------------
+        existing_source = self._get_binder_source_object(obj)
+        if existing_source and existing_source is not actual:
+            App.Console.PrintError(f"[OBA] Cannot add binders from different objects:\n" f"      existing = {existing_source.Name}\n" f"      new      = {actual.Name}\n")
+            return
+
+        # --------------------------------------------------
+        # Bygg target-lista (face/subelement)
+        # --------------------------------------------------
+        targets = [(sub,) for sub in sub_elements] if sub_elements else [("",)]
+        current = list(getattr(obj, "Binders", []))
+
+        # --------------------------------------------------
+        # Skapa ShapeBinders
+        # --------------------------------------------------
+        for target in targets:
+            label = target[0] if target[0] else "Body"
+
+            name = f"Binder_{actual.Name}_{label.replace('.', '_')}_{len(current)}"
+            if doc.getObject(name):
+                name = f"{name}_{len(current)}"
+
+            try:
+                b = doc.addObject("PartDesign::ShapeBinder", name)
+            except Exception as e:
+                App.Console.PrintError(f"[OBA] Failed to create ShapeBinder: {e}\n")
+                continue
+
+            # Koppla binder
+            b.Support = [(actual, target)]
+            b.TraceSupport = True
+            b.ViewObject.Visibility = False
+
+            # Lägg till till optiskt objekt
+            obj.addObject(b)
+            current.append(b)
+
+        # Uppdatera binder-listan samlat
+        obj.Binders = current
+
+        # --------------------------------------------------
+        # ✅ Uppdatera objektets LABEL baserat på källa
+        # --------------------------------------------------
+        self._update_label_from_binders(obj)
+
+    def add_binders_old(self, obj, source_obj, sub_elements):
         if not source_obj:
             return
 
@@ -398,6 +469,29 @@ class OBAElementProxy:
             current.append(b)
 
         obj.Binders = current
+
+    def _get_binder_source_object(self, obj):
+        """
+        Returnerar det objekt som binder-ytorna kommer ifrån.
+        Antagande: alla binders pekar på samma källa.
+        """
+        binders = getattr(obj, "Binders", [])
+        if not binders:
+            return None
+        b = binders[0]
+        if not b.Support:
+            return None
+
+        return b.Support[0][0]
+
+    def _update_label_from_binders(self, obj):
+        src = self._get_binder_source_object(obj)
+        if not src:
+            return
+        base = getattr(obj, "OpticalType", "Optic")
+        new_name = f"{base}_{src.Name}"
+        if obj.Name != new_name and not obj.Document.getObject(new_name):
+            obj.Label = new_name  # använd Label, inte Name
 
     def __getstate__(self):
         return None
@@ -517,7 +611,7 @@ class OBABaseDialog(QtWidgets.QDialog):
         self._sel_observer = None
 
         if self.ALLOW_SURFACE_SELECTION:
-            self.layout.addWidget(QtWidgets.QLabel("Linked surfaces:"))
+            self.layout.addWidget(QtWidgets.QLabel("Linked surfaces (same target only):"))
 
             self.list_binders = QtWidgets.QListWidget()
             self.layout.addWidget(self.list_binders)

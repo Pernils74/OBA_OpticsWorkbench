@@ -386,9 +386,10 @@ def handle_optical_interaction(ray, hit_p, normal, incoming_dir, props, target_l
             normal_eff,
             incoming_dir,
             None,
-            0.0,
             extra={
                 "power_in": P_in,
+                "power_out": P_in * (R + T),
+                "absorbed_power": P_in * (1.0 - R - T),
                 "reflected_power": P_in * R,
                 "transmitted_power": P_in * T,
             },
@@ -436,14 +437,12 @@ def handle_optical_interaction(ray, hit_p, normal, incoming_dir, props, target_l
             normal_l,
             incoming_dir,
             None,
-            0.0,
             extra={
                 "power_in": P_in,
+                "power_out": P_in * T,
+                "absorbed_power": P_in * (1.0 - R - T),
                 "R": R,
                 "T": T,
-                "n1": n1,
-                "n2": n2,
-                "entering": entering,
             },
         )
 
@@ -552,9 +551,10 @@ def handle_optical_interaction(ray, hit_p, normal, incoming_dir, props, target_l
             normal_eff,
             incoming_dir,
             None,  # ✅ parent-rayen dör här
-            0.0,
             extra={
                 "power_in": P_in,
+                "power_out": P_in,  # ✅ all effekt lämnar via diffrakterade ordningar
+                "absorbed_power": 0.0,  # ✅ ingen absorption antagen
                 "num_children": num_children,
                 "lines_per_mm": lines_per_mm,
             },
@@ -582,12 +582,8 @@ def handle_optical_interaction(ray, hit_p, normal, incoming_dir, props, target_l
             normal_eff,
             incoming_dir,
             incoming_dir,
-            ray.power,
-            extra={
-                "absorbed_power": P_abs,
-                "absorption": absorption,
-                "power_in": P_in,
-            },
+            # ray.power,
+            extra={"absorbed_power": P_abs, "absorption": absorption, "power_in": P_in, "power_out": ray.power},
         )
 
     return spawned_rays

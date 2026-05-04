@@ -86,7 +86,7 @@ class OBARay:
         normal,
         incoming_dir,
         outgoing_dir,
-        power,
+        # power,  # ingen "power" här – all energi finns i extra
         extra=None,
     ):
         entry = {
@@ -115,7 +115,7 @@ class OBARay:
                 if outgoing_dir is not None
                 else None
             ),
-            "power": power,
+            # "power": power,
             "bounce_index": self.bounce_count,
         }
 
@@ -517,95 +517,6 @@ class OBARayManager:
         # ============================================================
         # 8. REFRESH
         # ============================================================
-        self._coin_root.touch()
-        gui.updateGui()
-
-        self._notify()  # ✅ Trigger för notify listeners
-
-    def visualize_old(self, bounce_min=None, bounce_max=None, line_width=2.0, color_by_bounce=False, mode="final"):
-        print("ritar mode: ", mode)
-
-        # view = gui.activeDocument().activeView()
-
-        # ============================================================
-        # 1. ENSURE ROOT EXISTS AND IS ATTACHED
-        # ============================================================
-        self._ensure_coin_layers()
-
-        # ============================================================
-        # 2. SELECT LAYER
-        # ============================================================
-        target_node = self._preview_node if mode == "preview" else self._final_node
-
-        # ============================================================
-        # 3. CLEAR LAYER
-        # ============================================================
-        target_node.removeAllChildren()
-
-        # ============================================================
-        # 4. DATA
-        # ============================================================
-        if bounce_max == -1:
-            bounce_max = None
-
-        max_bounce_in_data = max((r.bounce_count for r in self.rays), default=0)
-
-        # ============================================================
-        # 5. STYLE
-        # ============================================================
-        draw_style = coin.SoDrawStyle()
-        draw_style.lineWidth.setValue(line_width)
-        target_node.addChild(draw_style)
-
-        # ============================================================
-        # 6. DRAW
-        # ============================================================
-        valid = 0
-
-        for ray in self.rays:
-
-            if ray.mode != mode:
-                continue
-
-            # Only visualize rays whose bounce_count is within [bounce_min, bounce_max]
-            if bounce_min is not None and ray.bounce_count < bounce_min:
-                continue
-            if bounce_max is not None and ray.bounce_count > bounce_max:
-                continue
-
-            pts = ray.points
-            if len(pts) < 2:
-                continue
-
-            valid += 1
-
-            ray_sep = coin.SoSeparator()
-
-            if color_by_bounce:
-                r, g, b = self._bounce_to_rgb(ray.bounce_count, bounce_min or 0, max_bounce_in_data)
-            else:
-                r, g, b = self._wavelength_to_rgb(ray.wavelength)
-
-            mat = coin.SoMaterial()
-            mat.diffuseColor.setValue(r, g, b)
-            ray_sep.addChild(mat)
-
-            coords = coin.SoCoordinate3()
-            coords.point.setValues(0, len(pts), [(p.x, p.y, p.z) for p in pts])
-            ray_sep.addChild(coords)
-
-            line = coin.SoLineSet()
-            line.numVertices.set1Value(0, len(pts))
-            ray_sep.addChild(line)
-
-            target_node.addChild(ray_sep)
-
-        print("VALID RAYS:", valid)
-
-        # ============================================================
-        # 7. FORCE REFRESH (CRITICAL)
-        # ============================================================
-        # view.scheduleRedraw()
         self._coin_root.touch()
         gui.updateGui()
 

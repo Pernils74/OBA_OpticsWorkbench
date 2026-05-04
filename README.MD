@@ -7,12 +7,18 @@ Before anything else, I want to give a shout‑out to **chbergmann** for the ori
 The original Optical Workbench can be found here:
 https://github.com/chbergmann/OpticsWorkbench
 
-### Version 0.1
-
 #### Changelog
+
+### Version 0.1
 
 - Added a semi‑transparent **reference (ghost) plane** to density and cluster plots to visually indicate the active projection plane.
 - Fixed performance issues causing slow redraws in the 3D view.
+
+### Version 0.2
+
+- Power‑vs‑Hit analysis plot
+- Revised power model with explicit energy bookkeeping
+- Automatic target‑based labeling of optical objects
 
 ## 🔧 Installation
 
@@ -347,7 +353,7 @@ It operates purely on ray visualization and does not affect ray tracing results.
 
 ---
 
-<!-- ................ Density Plot ................... -->
+<!-- ................ Cluster Plot ................... -->
 
 <img src="./examples/cluster_plot.png" width="550" align="right" alt="Lens dialog">
 
@@ -413,6 +419,34 @@ It operates purely on ray visualization and does not affect ray tracing results.
 
     Displays raw (x, y, z) values
     Useful for inspection, debugging, or export
+
+<hr style="clear: both;">
+
+<!-- ................ Power vs hit Plot ................... -->
+
+<img src="./examples/power_vs_hit_plot.png" width="550" align="right" alt="Lens dialog">
+
+## ![Power vs Hit Plot](./icons/plot_power_vs_hit.svg) Power vs Hit Plot
+
+    The plot clearly illustrates the cumulative power loss in the optical system, where each hit contributes to a reduction in remaining energy.
+    Features
+
+### Normalize to %
+
+    Displays power as a percentage of the initial value.
+
+### Show Ray Count
+
+    Shows the number of rays contributing to each hit (when enabled).
+
+### Log Y
+
+    Enables a logarithmic Y-axis for improved visualization of large dynamic ranges.
+
+## Filter Panel
+
+    Allows selection of which emitters and objects are included in the plot
+    (e.g. Emitter, Mirror, Mirror001, Absorber).
 
 <hr style="clear: both;">
 
