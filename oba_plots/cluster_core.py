@@ -189,7 +189,60 @@ def draw_blobs_2d(
 # -------------------------------------------------
 # Draw: Centroids
 # -------------------------------------------------
+
+
 def draw_centroids(
+    ax,
+    stats,
+    filter_spec,
+    plane_key,
+    flip2d,
+):
+    """
+    Rita EN centroid per (emitter, objekt, bounce)
+    Samma klusterdefinition som blobs.
+    """
+
+    merged = defaultdict(list)
+
+    for (emitter_id, path_signature), s in stats.items():
+        if not _allow(emitter_id, filter_spec.get("emitters")):
+            continue
+        if not path_signature:
+            continue
+
+        last_obj, _last_face = path_signature[-1]
+        if not _allow(last_obj, filter_spec.get("objects")):
+            continue
+
+        bounce = s.get("mean_bounce")  # eller min/max om du vill
+        key = (emitter_id, last_obj, int(round(bounce)))
+
+        merged[key].append(s["centroid"])
+
+    # Rita EN centroid per interaction-kluster
+    for (_emitter, _obj, _bounce), pts in merged.items():
+        n = len(pts)
+        cx = sum(p[0] for p in pts) / n
+        cy = sum(p[1] for p in pts) / n
+        cz = sum(p[2] for p in pts) / n
+
+        cx, cy = _project((cx, cy, cz), plane_key)
+        if flip2d:
+            cx, cy = cy, cx
+
+        ax.scatter(
+            [cx],
+            [cy],
+            s=120,
+            facecolor="none",
+            edgecolor="black",
+            linewidths=1.5,
+            zorder=20,
+        )
+
+
+def draw_centroids_old(
     ax,
     stats,
     filter_spec,

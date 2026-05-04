@@ -68,7 +68,7 @@ class ClusterPlotDialog(QtWidgets.QDialog):
         top.addWidget(self.chkGrid)
 
         self.chkEqual = QtWidgets.QCheckBox("Equal")
-        self.chkEqual.setChecked(True)
+        self.chkEqual.setChecked(False)
         top.addWidget(self.chkEqual)
 
         self.chkBlobs = QtWidgets.QCheckBox("Blobs")
@@ -279,7 +279,9 @@ class ClusterPlotDialog(QtWidgets.QDialog):
                     np.linspace(xmin, xmax, n),
                     np.linspace(ymin, ymax, n),
                 )
-                Z = np.zeros_like(X)
+                # Z = np.zeros_like(X)
+                z0 = np.median(all_zs)
+                Z = np.full_like(X, z0)
 
             elif plane == "XZ":
                 X, Z = np.meshgrid(
@@ -313,32 +315,6 @@ class ClusterPlotDialog(QtWidgets.QDialog):
         # -------------------------------------------------
         # Axes & legend
         # -------------------------------------------------
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        ax.set_zlabel("Z")
-        ax.legend(title="Objects")
-
-        self.canvas3d.draw_idle()
-
-    def _draw_3d_plot_old(self, hits, filter_spec):
-        self.fig3d.clear()
-        ax = self.fig3d.add_subplot(111, projection="3d")
-
-        hits_by_object = {}
-
-        for h in hits:
-            if h["emitter_id"] not in filter_spec["emitters"]:
-                continue
-            if h["object"] not in filter_spec["objects"]:
-                continue
-            hits_by_object.setdefault(h["object"], []).append(h)
-
-        cmap = matplotlib.cm.get_cmap("tab10")
-
-        for i, (obj, obj_hits) in enumerate(sorted(hits_by_object.items())):
-            xs, ys, zs = zip(*(h["point"] for h in obj_hits))
-            ax.scatter(xs, ys, zs, color=cmap(i), s=40, depthshade=True, label=obj)
-
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
         ax.set_zlabel("Z")

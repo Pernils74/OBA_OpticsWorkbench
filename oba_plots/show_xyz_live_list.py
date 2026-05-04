@@ -1,11 +1,6 @@
 # -*- coding: utf-8 -*-
 # show_xyz_live_list.py
 
-"""
-DocXYZLiveDialog – visar XYZ + Hits + PowerIn / PowerOut
-direkt från collect_ray_hits_and_stats (ingen DB, alltid mode="final")
-"""
-
 import csv
 from PySide import QtCore, QtWidgets
 import FreeCADGui as Gui
@@ -18,57 +13,68 @@ class DocXYZLiveDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent or Gui.getMainWindow())
 
-        self.setWindowTitle("XYZ + Hits + Power (Live, Final)")
+        self.setWindowTitle("XYZ + Hits + Power (Live, Final, DEBUG)")
         self.setModal(True)
-        self.setMinimumSize(1100, 650)
+        self.setMinimumSize(1250, 700)
 
         self._build_ui()
         self._wire()
 
-        # 🔥 alltid final
+        # alltid final
         self.filterPanel.set_mode("final")
         self._reload()
 
-    # ------------------------------------------------------------
-    # UI
     # ------------------------------------------------------------
     def _build_ui(self):
         root = QtWidgets.QVBoxLayout(self)
 
         # ---------- TOP BAR ----------
         top = QtWidgets.QHBoxLayout()
-
         self.btnReload = QtWidgets.QPushButton("Reload")
         top.addWidget(self.btnReload)
-
         top.addStretch(1)
 
         self.chkShowFilter = QtWidgets.QCheckBox("Show Filter")
         self.chkShowFilter.setChecked(True)
         top.addWidget(self.chkShowFilter)
-
         root.addLayout(top)
 
         # ---------- TABLE ----------
+        headers = [
+            "X",
+            "Y",
+            "Z",
+            "Hits",
+            "Emitter",
+            "Object",
+            "Face",
+            "Paths",
+            "Min Bounce",
+            "Max Bounce",
+            "Mean Bounce",
+            "Power Σ",
+            "Power In Σ",
+            "Power Out Σ",
+        ]
+
         self.tbl = QtWidgets.QTableWidget()
-        self.tbl.setColumnCount(6)
-        self.tbl.setHorizontalHeaderLabels(["X", "Y", "Z", "Hits", "Power In", "Power Out"])
+        self.tbl.setColumnCount(len(headers))
+        self.tbl.setHorizontalHeaderLabels(headers)
         self.tbl.setSortingEnabled(True)
         self.tbl.setAlternatingRowColors(True)
         self.tbl.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
 
-        # ---------- FILTER PANEL (REUSED) ----------
+        # ---------- FILTER ----------
         self.filterPanel = ClusterHitFilterPanel(self)
         self.filterPanel.setMaximumHeight(220)
 
-        # ---------- SPLITTER (TABLE | FILTER) ----------
-        self.mainSplitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
-        self.mainSplitter.addWidget(self.tbl)
-        self.mainSplitter.addWidget(self.filterPanel)
-        self.mainSplitter.setStretchFactor(0, 1)  # tabell prioritet
-        self.mainSplitter.setStretchFactor(1, 0)  # filter sekundär
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        splitter.addWidget(self.tbl)
+        splitter.addWidget(self.filterPanel)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 0)
 
-        root.addWidget(self.mainSplitter, 1)
+        root.addWidget(splitter, 1)
 
         # ---------- STATUS ----------
         self.lblStatus = QtWidgets.QLabel("")
@@ -90,8 +96,6 @@ class DocXYZLiveDialog(QtWidgets.QDialog):
         root.addLayout(btns)
 
     # ------------------------------------------------------------
-    # Wiring
-    # ------------------------------------------------------------
     def _wire(self):
         self.btnReload.clicked.connect(self._reload)
         self.filterPanel.filter_changed.connect(self._reload)
@@ -102,8 +106,6 @@ class DocXYZLiveDialog(QtWidgets.QDialog):
         self.btnClose.clicked.connect(self.accept)
 
     # ------------------------------------------------------------
-    # Data logic (LIVE, FINAL)
-    # ------------------------------------------------------------
     def _reload(self):
         hits, _stats = collect_ray_hits_and_stats(mode="final")
 
@@ -111,12 +113,12 @@ class DocXYZLiveDialog(QtWidgets.QDialog):
         allowed_emitters = set(filter_spec["emitters"])
         allowed_objects = set(filter_spec["objects"])
 
-        # ---------- Aggregate per (object, point) ----------
+        # key = (object, point)
         accum = {}
 
         for h in hits:
-            emitter = h.get("emitter_id")
-            obj = h.get("object")
+            emitter = h["emitter_id"]
+            obj = h["object"]
 
             if emitter not in allowed_emitters:
                 continue
@@ -132,64 +134,67 @@ class DocXYZLiveDialog(QtWidgets.QDialog):
                     "y": pt[1],
                     "z": pt[2],
                     "hits": 0,
+                    "emitters": set(),
+                    "faces": set(),
+                    "paths": set(),
+                    "bounces": [],
+                    "power": 0.0,
                     "power_in": 0.0,
                     "power_out": 0.0,
                 }
 
             a = accum[key]
             a["hits"] += 1
+            a["emitters"].add(emitter)
+            a["faces"].add(h["face"])
+            a["paths"].add(tuple(h["path_signature"]))
+            a["bounces"].append(h["bounce"])
+
+            a["power"] += h["power_out"]
             a["power_in"] += h.get("power_in") or 0.0
-            a["power_out"] += h.get("power_out") or 0.0
+            a["power_out"] += h["power_out"]
 
         # ---------- Fill table ----------
         self.tbl.setSortingEnabled(False)
         self.tbl.setRowCount(len(accum))
 
-        sum_hits = 0
-        sum_pin = 0.0
-        sum_pout = 0.0
-
         for row, a in enumerate(accum.values()):
-            self.tbl.setItem(row, 0, self._num_item(a["x"]))
-            self.tbl.setItem(row, 1, self._num_item(a["y"]))
-            self.tbl.setItem(row, 2, self._num_item(a["z"]))
-            self.tbl.setItem(row, 3, self._num_item(a["hits"]))
-            self.tbl.setItem(row, 4, self._num_item(a["power_in"]))
-            self.tbl.setItem(row, 5, self._num_item(a["power_out"]))
+            self.tbl.setItem(row, 0, self._num(a["x"]))
+            self.tbl.setItem(row, 1, self._num(a["y"]))
+            self.tbl.setItem(row, 2, self._num(a["z"]))
+            self.tbl.setItem(row, 3, self._num(a["hits"]))
 
-            sum_hits += a["hits"]
-            sum_pin += a["power_in"]
-            sum_pout += a["power_out"]
+            self.tbl.setItem(row, 4, QtWidgets.QTableWidgetItem(", ".join(map(str, a["emitters"]))))
+            self.tbl.setItem(row, 5, QtWidgets.QTableWidgetItem(str(len(a["paths"]))))
+            self.tbl.setItem(row, 6, QtWidgets.QTableWidgetItem(", ".join(map(str, a["faces"]))))
+
+            bs = a["bounces"]
+            self.tbl.setItem(row, 7, self._num(len(a["paths"])))
+            self.tbl.setItem(row, 8, self._num(min(bs)))
+            self.tbl.setItem(row, 9, self._num(max(bs)))
+            self.tbl.setItem(row, 10, self._num(sum(bs) / len(bs)))
+
+            self.tbl.setItem(row, 11, self._num(a["power"]))
+            self.tbl.setItem(row, 12, self._num(a["power_in"]))
+            self.tbl.setItem(row, 13, self._num(a["power_out"]))
 
         self.tbl.setSortingEnabled(True)
-
-        status = (f"Punkter: {len(accum):,} | Hits: {sum_hits:,} | " f"Σ Power In: {sum_pin:.6g} | Σ Power Out: {sum_pout:.6g}").replace(",", " ")
-
-        self.lblStatus.setText(status)
+        self.lblStatus.setText(f"Punkter: {len(accum)} | Hits: {sum(a['hits'] for a in accum.values())}")
 
     # ------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------
-    def _num_item(self, v):
+    def _num(self, v):
         it = QtWidgets.QTableWidgetItem()
         it.setData(QtCore.Qt.EditRole, v)
         it.setFlags(it.flags() & ~QtCore.Qt.ItemIsEditable)
         return it
 
     # ------------------------------------------------------------
-    # Actions
-    # ------------------------------------------------------------
     def _copy_clipboard(self):
-        rows = self.tbl.rowCount()
-        cols = self.tbl.columnCount()
-
-        lines = []
-        headers = [self.tbl.horizontalHeaderItem(c).text() for c in range(cols)]
-        lines.append("\t".join(headers))
+        rows, cols = self.tbl.rowCount(), self.tbl.columnCount()
+        lines = ["\t".join(self.tbl.horizontalHeaderItem(c).text() for c in range(cols))]
 
         for r in range(rows):
-            vals = [self.tbl.item(r, c).text() if self.tbl.item(r, c) else "" for c in range(cols)]
-            lines.append("\t".join(vals))
+            lines.append("\t".join(self.tbl.item(r, c).text() if self.tbl.item(r, c) else "" for c in range(cols)))
 
         QtWidgets.QApplication.clipboard().setText("\n".join(lines))
 
@@ -205,13 +210,8 @@ class DocXYZLiveDialog(QtWidgets.QDialog):
                 w.writerow([self.tbl.item(r, c).text() if self.tbl.item(r, c) else "" for c in range(self.tbl.columnCount())])
 
 
-# ------------------------------------------------------------
 def OBA_ShowXYZLiveList(parent=None):
-    if parent is None and Gui:
-        parent = Gui.getMainWindow()
-
-    dlg = DocXYZLiveDialog(parent)
+    dlg = DocXYZLiveDialog(parent or Gui.getMainWindow())
     dlg.show()
-
     Gui._xyz_live_list_dialog = dlg
     return dlg
