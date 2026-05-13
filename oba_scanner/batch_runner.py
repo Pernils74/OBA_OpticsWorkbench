@@ -248,6 +248,7 @@ def run_steps_for_batch(batch, prog_bar, status_lbl, pump_events_func, stop_flag
     placement_snaps = {}
 
     for step, data, *_ in parsed_steps:
+
         for lbl in (data.get("move"), data.get("move1"), data.get("move2")):
             if not lbl or lbl == "none":
                 continue
@@ -265,8 +266,8 @@ def run_steps_for_batch(batch, prog_bar, status_lbl, pump_events_func, stop_flag
 
             move_objects[key] = move_obj
             placement_snaps[key] = snapshot_placement(move_obj)
-            dump_placement_text(move_obj, header=f"Original placement for {move_obj.Name}")
 
+            dump_placement_text(move_obj, header=f"Original placement for {move_obj.Name}")
             clear_placement_expressions(move_obj)
 
     doc.recompute()
@@ -316,8 +317,20 @@ def run_steps_for_batch(batch, prog_bar, status_lbl, pump_events_func, stop_flag
                     dx, dy, dz = rotate(dx, dy, dz, rot_axis, rot_angle)
                     # ----------------------------------------------
                     # Apply offset ONLY to move objects
+                    # Select ONLY objects for THIS step
                     # ----------------------------------------------
-                    for name, move_obj in move_objects.items():
+                    step_move_objects = {}
+                    for lbl in (data.get("move"), data.get("move1"), data.get("move2")):
+                        if not lbl or lbl == "none":
+                            continue
+                        name = label_to_name.get(lbl)
+                        if not name:
+                            continue
+                        obj = move_objects.get(name)
+                        if obj:
+                            step_move_objects[name] = obj
+
+                    for name, move_obj in step_move_objects.items():
                         snap = placement_snaps[name]
                         # print("Moving", move_obj.Name, move_obj.TypeId)
                         apply_direct_offset(move_obj, snap, dx, dy, dz)
