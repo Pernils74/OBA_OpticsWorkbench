@@ -465,7 +465,7 @@ class BeamAbsorberHeatmapDock(QtWidgets.QDockWidget):
         else:  # YZ
             dx, dy, dz = 0.0, x_val, y_val
         self._move_objects_to_offset(dx, dy, dz)
-        self._update_profile_markers(x_val, y_val)
+        self._update_profile_markers(x_val, y_val, z_val)
 
     def _plot_profiles(self, Xi, Yi, Vi):
         self.figProf.clear()
@@ -483,7 +483,47 @@ class BeamAbsorberHeatmapDock(QtWidgets.QDockWidget):
         ax.grid(True)
         self.canvasProf.draw_idle()
 
-    def _update_profile_markers(self, x_val, y_val):
+    def _update_profile_markers(self, x_val, y_val, z_val):
+        if not hasattr(self, "_profile_X"):
+            return
+
+        ax = self.figProf.axes[0]
+        # ✅ ta bort gamla markers + linjer
+        if hasattr(self, "_profile_markers"):
+            for m in self._profile_markers:
+                try:
+                    m.remove()
+                except:
+                    pass
+
+        if hasattr(self, "_profile_hline"):
+            try:
+                self._profile_hline.remove()
+            except:
+                pass
+
+        # ✅ hitta index
+        idx_x = np.argmin(np.abs(self._profile_X - x_val))
+        idx_y = np.argmin(np.abs(self._profile_Y - y_val))
+
+        val_x = self._profile_X_values[idx_x]
+        val_y = self._profile_Y_values[idx_y]
+
+        # ✅ punkter
+        m1 = ax.scatter(self._profile_X[idx_x], val_x, color="red", s=60, zorder=10)
+        m2 = ax.scatter(self._profile_Y[idx_y], val_y, color="blue", s=60, zorder=10)
+
+        # ✅ NYTT: horisontell linje
+        # z_val = (val_x + val_y) * 0.5  # eller direkt från klick om du vill
+        col = "blue" if z_val > np.mean(self._profile_X_values) else "red"
+        self._profile_hline = ax.axhline(y=z_val, color=col, linestyle="--", linewidth=1, alpha=0.7)
+        ax.text(ax.get_xlim()[0], z_val, f"{z_val:.2f}", verticalalignment="bottom", fontsize=8, color="black")
+
+        self._profile_markers = [m1, m2]
+
+        self.canvasProf.draw_idle()
+
+    def _update_profile_markers_old(self, x_val, y_val):
         if not hasattr(self, "_profile_X"):
             return
         ax = self.figProf.axes[0]
