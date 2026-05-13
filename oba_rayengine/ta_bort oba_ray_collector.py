@@ -148,6 +148,9 @@ class OBARayCollector:
         if not hasattr(self, "Object"):
             return  # objektet är inte färdigrestaurerat ännu, kan ske vid reopen
 
+        if getattr(self.Object, "RunMode", "AUTO") == "MANUAL":
+            return
+
         # Bypass via argument eller property
         if force or getattr(self.Object, "DisableDebounce", False):
             self._run_raytrace(force=True)
@@ -225,6 +228,8 @@ class OBARayCollector:
             # --- Rensning ---
             rm.clear(mode="final")  # Ta bort gamla skarpa strålar
             rm.clear(mode="preview")  # Ta bort beam-previews så de inte stör vyn
+            # 🔥 FULL reset av ray state (men inte Coin root)
+            rm.clear(mode=None)
 
             # --- Emitters ---
             log.start("TRACE_EMITTERS", "Tracing emitters")

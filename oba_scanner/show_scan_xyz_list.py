@@ -61,8 +61,8 @@ class DocXYZDialog(QtWidgets.QDialog):
 
         # --- table ---
         self.tbl = QtWidgets.QTableWidget()
-        self.tbl.setColumnCount(6)
-        self.tbl.setHorizontalHeaderLabels(["X", "Y", "Z", "Hits", "Power In", "Power Out"])
+        self.tbl.setColumnCount(8)  #  <--- obs denna måste matcha antal kolumner i read_grid()
+        self.tbl.setHorizontalHeaderLabels(["X", "Y", "Z", "Hits", "Power In", "Power Out", "Loss", "Moved Objects"])
         self.tbl.setSortingEnabled(True)
         self.tbl.setAlternatingRowColors(True)
         self.tbl.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
@@ -135,7 +135,7 @@ class DocXYZDialog(QtWidgets.QDialog):
             return
 
         # ⬇️ ANTAR: power_in och power_out returneras
-        X, Y, Z, H, P_IN, P_OUT = self.db.read_grid(doc, tgt, emi)
+        X, Y, Z, H, P_IN, P_OUT, MOVED = self.db.read_grid(doc, tgt, emi)
 
         self.tbl.setSortingEnabled(False)
         self.tbl.setRowCount(len(X))
@@ -144,13 +144,17 @@ class DocXYZDialog(QtWidgets.QDialog):
         sum_p_in = 0.0
         sum_p_out = 0.0
 
-        for i, (x, y, z, h, pin, pout) in enumerate(zip(X, Y, Z, H, P_IN, P_OUT)):
+        for i, (x, y, z, h, pin, pout, moved) in enumerate(zip(X, Y, Z, H, P_IN, P_OUT, MOVED)):
             self.tbl.setItem(i, 0, self._num_item(x))
             self.tbl.setItem(i, 1, self._num_item(y))
             self.tbl.setItem(i, 2, self._num_item(z))
             self.tbl.setItem(i, 3, self._num_item(h))
             self.tbl.setItem(i, 4, self._num_item(pin))
             self.tbl.setItem(i, 5, self._num_item(pout))
+            loss = (pin or 0.0) - (pout or 0.0)
+            self.tbl.setItem(i, 6, self._num_item(loss))
+
+            self.tbl.setItem(i, 7, self._text_item(moved.replace(";", ", ")))
 
             sum_hits += h or 0
             sum_p_in += pin or 0.0
@@ -162,6 +166,11 @@ class DocXYZDialog(QtWidgets.QDialog):
     # ------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------
+    def _text_item(self, txt):
+        it = QtWidgets.QTableWidgetItem(str(txt))
+        it.setFlags(it.flags() & ~QtCore.Qt.ItemIsEditable)
+        return it
+
     def _num_item(self, v):
         it = QtWidgets.QTableWidgetItem()
         it.setData(QtCore.Qt.EditRole, v)

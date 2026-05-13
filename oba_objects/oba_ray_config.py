@@ -42,6 +42,11 @@ class OBARayConfig(OBAElementProxy):
             obj.TraceMode = ["OCC", "Mesh"]
             obj.TraceMode = "Mesh"
 
+        if not hasattr(obj, "RunMode"):
+            obj.addProperty("App::PropertyEnumeration", "RunMode", "TraceSettings", "How tracing is triggered")
+            obj.RunMode = ["AUTO", "MANUAL"]
+            obj.RunMode = "AUTO"
+
         if not hasattr(obj, "OpticalType"):
             obj.addProperty("App::PropertyString", "OpticalType", "Base", "Type of optical element")
         obj.OpticalType = "RayConfig"  # används för icon
@@ -195,6 +200,8 @@ class RayConfigDialog(OBABaseDialog):
 
     def _build_trace_settings(self, layout):
         self._add_enum("Trace mode", "TraceMode", layout)
+        self._add_enum("Run mode", "RunMode", layout)
+
         self._add_bool("Disable debounce", "DisableDebounce", layout)
 
     def _build_mesh_settings(self, layout):
@@ -368,11 +375,17 @@ def OBA_CreateRayConfig(doc=None, show_dialog=True):
     - visa dialog
     """
     doc = doc or App.ActiveDocument or App.newDocument()
+    from oba_objects.oba_base import _trigger_ray_engine
 
     # 0. Finns den redan? → använd den
     cfg = doc.getObject("OBARayConfig")
     if cfg:
-        RayConfigDialog(cfg).show()
+        _trigger_ray_engine(reason="rayconfig_opened", source=cfg, force=True)
+
+        # if show_dialog:
+        #     RayConfigDialog(cfg).show()
+
+        # RayConfigDialog(cfg).show()
         return cfg
 
     # 1. Skapa objektet

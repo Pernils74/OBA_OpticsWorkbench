@@ -92,6 +92,12 @@ class OBARayEngine:
         # ----------------------------
         # TRACE-POLICY
         # ----------------------------
+
+        # ✅ NYCKELN (läggs TIDIGT)
+        if cfg and getattr(cfg, "RunMode", "AUTO") == "MANUAL" and not force:
+            return  # ⛔ stoppa ALL auto-trace
+
+        # fallback (om ingen config)
         if not cfg:
             if force:
                 self._run(force=True)
@@ -99,10 +105,12 @@ class OBARayEngine:
                 self._debounce.start(300)
             return
 
+        # 🔄 skydd mot recursion
         if self._in_compute:
             self._dirty = True
             return
 
+        # ⚙️ normal execution
         if force or getattr(cfg, "DisableDebounce", False):
             self._run(force=True)
         else:

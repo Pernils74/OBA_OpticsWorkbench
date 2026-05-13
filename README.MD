@@ -1,8 +1,6 @@
-### Why another optics workbench you say…
+### OBA Opticsworkbench
 
-### ... Its because it’s different, that’s why.
-
-Before anything else, I want to give a shout‑out to **chbergmann** for the original **Optical Workbench**. That project has been the primary inspiration for this work and laid the foundation for many of the ideas developed further here.
+Before anything else, I want to give a shout‑out to **chbergmann** for the original **OpticsWorkbench**. That project has been the primary inspiration for this extension and laid the foundation for many of the ideas developed further here.
 
 The original Optical Workbench can be found here:
 https://github.com/chbergmann/OpticsWorkbench
@@ -19,6 +17,18 @@ https://github.com/chbergmann/OpticsWorkbench
 - Power‑vs‑Hit analysis plot
 - Revised power model with explicit energy bookkeeping
 - Automatic target‑based labeling of optical objects
+
+### Version 0.3
+
+- Fixed transformation handling so that changes applied to `PartDesign::Body` correctly update `_affected_optical_objects` and retrigger ray tracing.
+- Fixed cluster plot filtering to correctly use the composite key:
+  `(optical_object, bounce_count, prev_hit_label)`.
+- Fixed absorber behavior:
+  absorbers now attenuate rays when absorption < 1.0, instead of acting as a pure sink.
+- Improved generation of optical object names to ensure consistent and clear representation in the TreeView.
+- Fixed scanner logic so that objects with Placement controlled by expressions  
+  (e.g. `Spreadsheet`, `ExpressionEngine`) are handled correctly.
+- Extended Heatmap Viewer with interactive surface picking, profile linking, and direct object offset replay.
 
 ## 🔧 Installation
 
@@ -117,7 +127,7 @@ https://github.com/chbergmann/OpticsWorkbench
 
 <hr style="clear: both;">
 
-<!-- ................ Mirror ................... -->
+<!-- ................ Lens ................... -->
 
 <img src="./examples/dialog_lens.png" width="320" align="right" alt="Lens dialog">
 
@@ -184,6 +194,15 @@ https://github.com/chbergmann/OpticsWorkbench
 > If no RayConfig is present, no rays will be traced or displayed.
 
 - `Trace mode` Mesh — triangle‑based ray tracing **_(default)_** ,OCC — OpenCASCADE analytic geometry tracing
+
+- `Run mode`
+  - **AUTO** — Ray tracing is triggered automatically by changes in the document (geometry edits, property changes, etc.).  
+    Recommended for interactive work.
+
+  - **MANUAL** — Automatic tracing is disabled.  
+    Tracing must be triggered explicitly (used by batch processing, scanners, and scripted workflows).
+
+    💡 Rays can still be updated manually by creating or reopening the RayConfig object.
 
 - `Disable debounce` Disables automatic trace debouncing
 
@@ -531,6 +550,8 @@ It operates purely on ray visualization and does not affect ray tracing results.
 
 - `Plane` Selects projection plane:
 
+- `Clickable surfaces` Enables interactive selection on the heatma
+
 - `Smooth` Enables spatial smoothing of the data.
 
 - `Strength` Controls smoothing strength.
@@ -545,6 +566,14 @@ It operates purely on ray visualization and does not affect ray tracing results.
     Height represents accumulated value
     Color map: viridis
     Updated dynamically on data or option changes
+
+##### Clickable surface
+
+    When **Clickable surface** is enabled:
+
+    Clicking the surface selects a scan position (offset)
+    A red marker shows the selected point in the 3D plot
+    The corresponding offset is applied to the moved objects in the FreeCAD scene
 
 #### Profiles
 

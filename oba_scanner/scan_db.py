@@ -59,8 +59,7 @@ class HitsDB:
     def _init_schema(self):
         c = self.conn.cursor()
 
-        c.execute(
-            """
+        c.execute("""
             CREATE TABLE IF NOT EXISTS hits (
                 doc_name TEXT,
                 target_object TEXT,
@@ -80,8 +79,7 @@ class HitsDB:
                     x, y, z
                 )
             )
-            """
-        )
+            """)
 
         # ---- migration ----
         c.execute("PRAGMA table_info(hits)")
@@ -97,6 +95,8 @@ class HitsDB:
         add("emitter_id", "ALTER TABLE hits ADD COLUMN emitter_id TEXT")
 
         add("optical_type", "ALTER TABLE hits ADD COLUMN optical_type TEXT")
+
+        add("moved_objects", "ALTER TABLE hits ADD COLUMN moved_objects TEXT")
 
         add("power_in", "ALTER TABLE hits ADD COLUMN power_in REAL DEFAULT 0.0")
 
@@ -133,13 +133,14 @@ class HitsDB:
                     target_object,
                     emitter_id,
                     optical_type,
+                    moved_objects,
                     x, y, z,
                     hits,
                     power_in,
                     power_out,
                     absorbed_power
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(
                     doc_name,
                     target_object,
@@ -150,7 +151,8 @@ class HitsDB:
                     hits = excluded.hits,
                     power_in = excluded.power_in,
                     power_out = excluded.power_out,
-                    absorbed_power = excluded.absorbed_power
+                    absorbed_power = excluded.absorbed_power,
+                    moved_objects = excluded.moved_objects
                 """,
                 rows,
             )
@@ -169,7 +171,8 @@ class HitsDB:
                 SELECT x, y, z,
                        hits,
                        power_in,
-                       power_out
+                       power_out,
+                       moved_objects
                 FROM hits
                 WHERE doc_name=? AND target_object=? AND emitter_id=?
                 ORDER BY z, y, x
@@ -178,16 +181,17 @@ class HitsDB:
             )
             rows = cur.fetchall()
 
-        X, Y, Z, H, P_IN, P_OUT = [], [], [], [], [], []
-        for x, y, z, h, pin, pout in rows:
+        X, Y, Z, H, P_IN, P_OUT, MOVED_OBJ = [], [], [], [], [], [], []
+        for x, y, z, h, pin, pout, moved_objects in rows:
             X.append(x)
             Y.append(y)
             Z.append(z)
             H.append(h)
             P_IN.append(pin)
             P_OUT.append(pout)
+            MOVED_OBJ.append(moved_objects)
 
-        return X, Y, Z, H, P_IN, P_OUT
+        return X, Y, Z, H, P_IN, P_OUT, MOVED_OBJ
 
     # --------------------------------------------------
     # Listing helpers

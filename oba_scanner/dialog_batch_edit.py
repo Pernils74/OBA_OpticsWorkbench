@@ -9,6 +9,7 @@ import FreeCAD as App
 import FreeCADGui as Gui
 from PySide import QtWidgets, QtCore, QtGui
 
+
 from .dialog_step_edit import StepEditDialog
 from .batch_runner import run_steps_for_batch
 from .heatmap_viewer import ShowHeatmapViewer
@@ -175,6 +176,7 @@ class BatchGroupDock(QtWidgets.QDockWidget):
 
             try:
                 data = json.loads(s.DataJSON or "{}")
+
                 json_str = json.dumps(data, separators=(",", ":"))
             except Exception:
                 json_str = "<invalid json>"
@@ -182,6 +184,8 @@ class BatchGroupDock(QtWidgets.QDockWidget):
             text = f"{s.Title} (ID: {s.Id}) | {json_str}"
             it = QtWidgets.QListWidgetItem(text)
             it.setData(QtCore.Qt.UserRole, s.Name)
+            if not getattr(s, "Active", True):
+                it.setForeground(QtGui.QBrush(QtGui.QColor("gray")))
             self.list.addItem(it)
 
     # --------------------------------------------------
@@ -327,8 +331,8 @@ def create_step_object(parent_group):
     step.Title = "Step"
     step.Id = datetime.datetime.now().strftime("ST_%Y%m%d_%H%M%S")
     step.Active = True
-    step.DataJSON = json.dumps({}, indent=2)
 
+    step.DataJSON = json.dumps({}, indent=2)
     parent_group.addObject(step)
     return step
 

@@ -24,11 +24,14 @@ class OBARay:
         self.emitter_id = emitter_id  # vilken source
 
         self.mode = mode  # 🔥 final = vanlig raytrace, preview = temporärt för beam visningen
+
         self.bounce_count = bounce_count
 
         self.last_facet = None  # Används i propogate frö att inte "fastna" i samma yta vid hit
-        self.last_hit_face = None  # senaste träffad yta
-        self.prev_hit_face = None  # föregående träffad yta
+        self.last_target_id = None  # “Vilken triangel/facet på vilket target träffades senast, så vi inte träffar exakt samma igen p.g.a. numerik.”
+
+        self.last_hit_label = None  # label på senaste träffad yta. Sätts i add_segment
+        self.prev_hit_label = None  # label på föregående träffad yta. Sätts i spawn_child
 
         self.history = []  # historik
 
@@ -39,13 +42,12 @@ class OBARay:
 
         OBARayManager().add(self)
 
-    def add_segment(self, end_point, interaction_type=None, hit_face=None):
+    def add_segment(self, end_point, interaction_type=None, hit_face_label=None):  # origin_face=None, origin_label=None):
         self.points.append(end_point)
 
-        # Logga ytor
-        if hit_face is not None:
-            self.prev_hit_face = self.last_hit_face
-            self.last_hit_face = hit_face
+        # Logga senaste träffade yta.
+        if hit_face_label is not None:
+            self.last_hit_label = hit_face_label
 
         if interaction_type:
             self.history.append(interaction_type)
@@ -77,7 +79,7 @@ class OBARay:
     # LOGGNING
     # -----------------------------
 
-    def log_bounce(
+    def log_bounce_utan_prevoius_face(
         self,
         object_name,
         optical_type,
@@ -86,7 +88,6 @@ class OBARay:
         normal,
         incoming_dir,
         outgoing_dir,
-        # power,  # ingen "power" här – all energi finns i extra
         extra=None,
     ):
         entry = {
@@ -94,29 +95,51 @@ class OBARay:
             "parent_id": str(self.parent_id) if self.parent_id else None,
             "object_name": object_name,
             "optical_type": optical_type,
+            # var träffen sker
             "face_id": str(hit_face),
+            # 🔥 hämta automatiskt från ray state
+            "prev_face": str(self.prev_hit_face) if self.prev_hit_face else None,
             "hit_point": (hit_point.x, hit_point.y, hit_point.z),
             "normal": (normal.x, normal.y, normal.z),
-            "incoming_dir": (
-                (
-                    incoming_dir.x,
-                    incoming_dir.y,
-                    incoming_dir.z,
-                )
-                if incoming_dir
-                else None
-            ),
-            "outgoing_dir": (
-                (
-                    outgoing_dir.x,
-                    outgoing_dir.y,
-                    outgoing_dir.z,
-                )
-                if outgoing_dir is not None
-                else None
-            ),
-            # "power": power,
+            "incoming_dir": ((incoming_dir.x, incoming_dir.y, incoming_dir.z) if incoming_dir else None),
+            "outgoing_dir": ((outgoing_dir.x, outgoing_dir.y, outgoing_dir.z) if outgoing_dir else None),
             "bounce_index": self.bounce_count,
+        }
+
+        if extra:
+            entry["extra"] = extra
+
+        self.history.append(entry)
+
+    def log_bounce(
+        self,
+        object_name,
+        optical_type,
+        last_hit_label,
+        prev_hit_label,
+        hit_point,
+        normal,
+        incoming_dir,
+        outgoing_dir,
+        extra=None,
+    ):
+        entry = {
+            # Identitet
+            "ray_id": str(self.id),
+            "parent_id": str(self.parent_id) if self.parent_id else None,
+            "path_id": str(self.path_id),
+            "bounce_index": self.bounce_count,
+            # Optisk kontext
+            "object_name": object_name,
+            "optical_type": optical_type,  # Mirror /Lens / Absorber ...
+            # Topologi
+            "last_hit_label": last_hit_label,  # Vart ray har sist aggerat emot
+            "prev_hit_label": prev_hit_label,  # "prev_face": str(prev_face) if prev_face else None,
+            # Geometri
+            "hit_point": (hit_point.x, hit_point.y, hit_point.z),
+            "normal": (normal.x, normal.y, normal.z),
+            "incoming_dir": ((incoming_dir.x, incoming_dir.y, incoming_dir.z) if incoming_dir else None),
+            "outgoing_dir": ((outgoing_dir.x, outgoing_dir.y, outgoing_dir.z) if outgoing_dir else None),
         }
 
         if extra:
@@ -143,12 +166,17 @@ class OBARay:
             wavelength=child_wavelength,
             power=power,
             emitter_id=self.emitter_id,
-            bounce_count=self.bounce_count + 1,  # Behåll index för samma interaktion
+            bounce_count=self.bounce_count,  # Behåll index för samma interaktion
             mode=self.mode,
             parent_id=self.id,  # vilken händelse skapade mig
             path_id=self.path_id,  # Ärver path_id så att alla i samma "gren" har samma path_id. vilken fysisk stråle tillhör jag?
             medium_stack=self.medium_stack,  # 🔥 ÄRVER STACKEN
         )
+
+        child.last_facet = self.last_facet
+        child.last_target_id = self.last_target_id
+
+        child.prev_hit_label = self.last_hit_label  # ✅ Ärver ifrån parent
 
         if extra:
             # Istället för att bara appenda extra till history,
@@ -409,7 +437,7 @@ class OBARayManager:
 
     def visualize(self, bounce_min=None, bounce_max=None, line_width=2.0, color_by_bounce=False, mode="final"):
 
-        print("ritar mode:", mode)
+        # print("ritar mode:", mode)
 
         # ============================================================
         # 1. ENSURE ROOT EXISTS
@@ -451,6 +479,8 @@ class OBARayManager:
         valid = 0
 
         for ray in self.rays:
+            # if ray.power <= 0.0:
+            #     continue
 
             if ray.mode != mode:
                 continue
@@ -599,56 +629,6 @@ class OBARayManager:
 
         gui.updateGui()
 
-    def draw_normal_arrow_old(self, origin, direction, length=2.0, color=(1, 0, 0), mode="normal_preview"):
-
-        # ============================================================
-        # Ensure coin root
-        # ============================================================
-        self._ensure_coin_layers()
-
-        # ============================================================
-        # Select node
-        # ============================================================
-        if mode == "normal_preview":
-            target = self._normal_preview_node
-        else:
-            raise ValueError("Unsupported arrow mode")
-
-        target.removeAllChildren()
-
-        # ============================================================
-        # Normalize
-        # ============================================================
-        d = direction
-        if d.Length == 0:
-            return
-        d = d.normalize() * length
-
-        p0 = origin
-        p1 = origin + d
-
-        # ============================================================
-        # Geometry
-        # ============================================================
-        sep = coin.SoSeparator()
-
-        mat = coin.SoMaterial()
-        mat.diffuseColor.setValue(*color)
-        sep.addChild(mat)
-
-        coords = coin.SoCoordinate3()
-        coords.point.setValues(0, 2, [(p0.x, p0.y, p0.z), (p1.x, p1.y, p1.z)])
-        sep.addChild(coords)
-
-        line = coin.SoLineSet()
-        line.numVertices.set1Value(0, 2)
-        sep.addChild(line)
-
-        target.addChild(sep)
-
-        self._coin_root.touch()
-        gui.updateGui()
-
     def _wavelength_to_rgb(self, wavelength_nm):
         """
         Approximerar synligt spektrum 380–750 nm till RGB.
@@ -783,19 +763,3 @@ class OBARayManager:
                     mapping.setdefault(eid, set()).add(h["object_name"])
 
         return mapping
-
-
-# for b in ray.bounce_log:
-#     print(b)
-
-# {
-#  'object_name': 'Mirror001',
-#  'optical_type': 'Mirror',
-#  'face_id': 23,
-#  'hit_point': (12.33, -5.88, 44.10),
-#  'normal': (0.12, 0.99, -0.03),
-#  'incoming_dir': (0.0, 0.3, 0.95),
-#  'outgoing_dir': (0.0, -0.3, -0.95),
-#  'power': 0.87,
-#  'bounce_index': 1
-# }

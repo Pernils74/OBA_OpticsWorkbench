@@ -327,11 +327,24 @@ def ray_intersects_bbox_fast(origin, inv_dir, bbox):
     return tmax >= max(0.0, tmin)
 
 
-def handle_optical_interaction(ray, hit_p, normal, incoming_dir, props, target_label):
+def handle_optical_interaction(
+    ray,
+    hit_p,
+    normal,
+    incoming_dir,
+    props,
+    # target_label,
+    # previous_face,
+):
     """
     Utför optisk interaktion på 'ray'.
     Returnerar en lista med nya strålar (0..N) som ska propagras vidare.
     """
+    # target_label = ray.last_hit_label  # last_hit_face_label är satt via add_segment
+
+    last_hit_label = ray.last_hit_label
+    prev_hit_label = ray.prev_hit_label
+
     spawned_rays = []
     o_type = props.get("OpticalType", "Absorber")
 
@@ -378,10 +391,12 @@ def handle_optical_interaction(ray, hit_p, normal, incoming_dir, props, target_l
             )
         # ✅ Parent-rayen är klar
         ray.power = 0.0
+
         ray.log_bounce(
             props["Name"],
             o_type,
-            target_label,
+            last_hit_label,  # gamla target_label
+            prev_hit_label,
             hit_p,
             normal_eff,
             incoming_dir,
@@ -429,10 +444,12 @@ def handle_optical_interaction(ray, hit_p, normal, incoming_dir, props, target_l
         T = 1.0 - R
 
         # --- Logga träffen på parent-rayen ---
+
         ray.log_bounce(
             props["Name"],
             o_type,
-            target_label,
+            last_hit_label,
+            prev_hit_label,
             hit_p,
             normal_l,
             incoming_dir,
@@ -543,10 +560,12 @@ def handle_optical_interaction(ray, hit_p, normal, incoming_dir, props, target_l
             num_children += 1
 
         # --- Logga träffen på parent-rayen ---
+
         ray.log_bounce(
             props["Name"],
             o_type,
-            target_label,
+            last_hit_label,
+            prev_hit_label,
             hit_p,
             normal_eff,
             incoming_dir,
@@ -566,352 +585,69 @@ def handle_optical_interaction(ray, hit_p, normal, incoming_dir, props, target_l
     # ==================================================
     # ABSORBER
     # ==================================================
+
     else:
-        absorption = props.get("Absorption", 0.0)
+        absorption = props.get("Absorption", 1.0)
+
         P_in = ray.power
         P_abs = P_in * absorption
-        ray.power = P_in - P_abs
+        P_out = P_in - P_abs
 
-        ray.add_segment(hit_p, interaction_type="absorb", hit_face=target_label)
-
-        ray.log_bounce(
-            props["Name"],
-            o_type,
-            target_label,
-            hit_p,
-            normal_eff,
-            incoming_dir,
-            incoming_dir,
-            # ray.power,
-            extra={"absorbed_power": P_abs, "absorption": absorption, "power_in": P_in, "power_out": ray.power},
-        )
-
-    return spawned_rays
-
-
-def handle_optical_interaction_old(ray, hit_p, normal, incoming_dir, props, target_label):
-    """
-    Utför optisk interaktion på 'ray'.
-    Returnerar en lista med nya strålar (0..N) som ska propagras vidare.
-    """
-    spawned_rays = []
-    o_type = props.get("OpticalType", "Absorber")
-
-    # ==================================================
-    # 0b. Tillämpa FlipNormal (fysik)
-    # ==================================================
-    normal_eff = normal
-    if props.get("FlipNormal", False):
-        normal_eff = -normal_eff
-
-    # ==================================================
-    # MIRROR
-    # ==================================================
-
-    if o_type == "Mirror":
-        P_in = ray.power
-
-        R = props.get("Reflectivity", 1.0)
-        T = props.get("Transmissivity", 0.0)
-
-        reflect_dir = reflect(incoming_dir, normal_eff)
-        ray.direction = reflect_dir
-        ray.power = P_in * R
-        ray.move_origin(hit_p + normal * 1e-4)
-
-        ray.log_bounce(
-            props["Name"],
-            o_type,
-            target_label,
-            hit_p,
-            normal_eff,
-            incoming_dir,
-            reflect_dir,
-            ray.power,
-            extra={
-                "power_in": P_in,
-                "power_out": ray.power,
-                "reflected_power": ray.power,
-                "transmitted_power": P_in * T,
-                "reflectivity": R,
-                "transmissivity": T,
-            },
-        )
-
-        # Transmitterad gren
-        if T > 1e-6:
+        # --- Ev. transmission (child) ---
+        if P_out > 1e-12:
             spawned_rays.append(
                 ray.spawn_child(
                     direction=incoming_dir,
-                    power=P_in * T,
-                    offset=-normal * 1e-4,
+                    power=P_out,
+                    offset=-normal_eff * 1e-4,
                     extra={
-                        "type": "mirror_transmission",
+                        "type": "absorber_transmission",
                         "power_in": P_in,
-                        "power_out": P_in * T,
+                        "power_out": P_out,
+                        "absorption": absorption,
                     },
                 )
             )
 
-    # ==================================================
-    # LENSE (Snell + valfri Fresnel-split)
-    # ==================================================
-
-    elif o_type == "Lense":
-        # --------------------------------------------------
-        # 0. Power bookkeeping
-        # --------------------------------------------------
-        P_in = ray.power
-
-        # --------------------------------------------------
-        # 1. Grunddata
-        # --------------------------------------------------
-        surface_n = props.get("RefractiveIndex", 1.5)
-        use_fresnel = props.get("UseFresnel", False)
-
-        incoming_dir = ray.direction
-        normal_l = normal_eff
-
-        # Avgör om vi går IN i materialet eller UT
-        entering = incoming_dir.dot(normal) < 0
-
-        # Säkerställ att normalen pekar MOT inkommande stråle
-        if incoming_dir.dot(normal_l) > 0:
-            normal_l = -normal_l
-
-        # --------------------------------------------------
-        # 2. Bestäm n1 / n2 från medium-stack
-        # --------------------------------------------------
-        n1 = ray.current_n
-
-        if entering:
-            n2 = surface_n
-        else:
-            n2 = ray.medium_stack[-2] if len(ray.medium_stack) > 1 else 1.0
-
-        # --------------------------------------------------
-        # 3. Beräkna brytning (Snell)
-        # --------------------------------------------------
-        refract_dir = refract(incoming_dir, normal_l, n1, n2)
-
-        # --------------------------------------------------
-        # 4. Fresnel (Schlick-approximation)
-        # --------------------------------------------------
-        def fresnel_schlick(incident, normal, n1, n2):
-            cosi = max(-1.0, min(1.0, -incident.dot(normal)))
-            r0 = ((n1 - n2) / (n1 + n2)) ** 2
-            return r0 + (1 - r0) * (1 - cosi) ** 5
-
-        if not refract_dir:
-            R = 1.0  # totalreflektion
-        elif use_fresnel:
-            R = fresnel_schlick(incoming_dir, normal_l, n1, n2)
-        else:
-            R = 0.0
-
-        T = 1.0 - R
-
-        # --------------------------------------------------
-        # 5. Reflekterad gren (Fresnel)
-        # --------------------------------------------------
-        if R > 1e-6:
-            reflect_dir = reflect(incoming_dir, normal_l)
-
-            child_reflect = ray.spawn_child(
-                direction=reflect_dir,
-                power=P_in * R,
-                offset=normal_l * 1e-4,
-                extra={
-                    "type": "fresnel_reflection",
-                    "power_in": P_in,
-                    "power_out": P_in * R,
-                    "R": R,
-                    "T": T,
-                    "n1": n1,
-                    "n2": n2,
-                    "entering": entering,
-                },
-            )
-            spawned_rays.append(child_reflect)
-
-        # --------------------------------------------------
-        # 6. Transmitterad stråle (huvudray)
-        # --------------------------------------------------
-        if refract_dir and T > 1e-6:
-            ray.power = P_in * T
-            ray.direction = refract_dir
-
-            # Flytta strålen till andra sidan ytan
-            ray.move_origin(hit_p - normal_l * 1e-4)
-
-            # Uppdatera medium-stack
-            if entering:
-                ray.enter_medium(n2)
-            else:
-                ray.exit_medium()
-
-            ray.log_bounce(
-                props["Name"],
-                o_type,
-                target_label,
-                hit_p,
-                normal_l,
-                incoming_dir,
-                refract_dir,
-                ray.power,
-                extra={
-                    "power_in": P_in,
-                    "power_out": ray.power,
-                    "R": R,
-                    "T": T,
-                    "n1": n1,
-                    "n2": n2,
-                    "entering": entering,
-                    "medium_stack": ray.medium_stack.copy(),
-                },
-            )
-
-        else:
-            # Ingen transmission (t.ex. totalreflektion)
-            ray.power = 0.0
-
-    # ==================================================
-    # PRISME (Snell + valfri Fresnel-split)
-    # ==================================================
-
-    elif o_type == "Grating":
-        import math
-
-        # --------------------------------------------------
-        # 0. Power bookkeeping
-        # --------------------------------------------------
-        P_in = ray.power
-
-        # --------------------------------------------------
-        # 1. Parametrar
-        # --------------------------------------------------
-        lines_per_mm = props.get("LinesPerMM", 600.0)
-        num_spectral_rays = int(props.get("SpectrumRays", 5))
-        m = 1  # 1:a diffraktionsordningen
-
-        # Gitterperiod i nm
-        d_nm = 1_000_000.0 / lines_per_mm
-
-        # --------------------------------------------------
-        # 2. Spektrumintervall (nm)
-        # --------------------------------------------------
-        lambda_min, lambda_max = 400.0, 700.0
-        step = (lambda_max - lambda_min) / max(1, num_spectral_rays - 1)
-
-        # --------------------------------------------------
-        # 3. Lokala axlar på ytan
-        # --------------------------------------------------
-        up = App.Vector(0, 0, 1)
-        if abs(normal.dot(up)) > 0.99:
-            up = App.Vector(1, 0, 0)
-
-        grating_dir = normal.cross(up).normalize()
-        dispersion_dir = normal.cross(grating_dir).normalize()
-
-        # --------------------------------------------------
-        # 4. Skapa diffrakterade barn‑strålar
-        # --------------------------------------------------
-        per_ray_power = P_in / max(1, num_spectral_rays)
-
-        for i in range(num_spectral_rays):
-            wl = lambda_min + i * step
-
-            # Gitterekvationen: sin(theta_out) = sin(theta_in) + m*lambda/d
-            sin_in = incoming_dir.dot(dispersion_dir)
-            sin_out = sin_in + (m * wl) / d_nm
-
-            if abs(sin_out) > 1.0:
-                continue  # ingen verklig lösning
-
-            cos_out = math.sqrt(1.0 - sin_out**2)
-
-            # Bestäm vilken sida normalen ska användas åt
-            sign = 1.0 if incoming_dir.dot(normal) > 0 else -1.0
-
-            # Bevara komponent längs ritsorna
-            comp_grating = incoming_dir.dot(grating_dir)
-
-            refract_dir = (dispersion_dir * sin_out + grating_dir * comp_grating + normal * (sign * cos_out)).normalize()
-
-            child = ray.spawn_child(
-                direction=refract_dir,
-                power=per_ray_power,
-                offset=normal * (sign * 1e-4),
-                wavelength=wl,
-                extra={
-                    "type": "grating_order",
-                    "order": m,
-                    "power_in": P_in,
-                    "power_out": per_ray_power,
-                    "wavelength": wl,
-                    "lines_per_mm": lines_per_mm,
-                },
-            )
-
-            spawned_rays.append(child)
-
-        # --------------------------------------------------
-        # 5. Huvudrayen lämnar ingen power
-        # --------------------------------------------------
+        # --- Parent-ray är alltid klar ---
         ray.power = 0.0
 
         ray.log_bounce(
             props["Name"],
             o_type,
-            target_label,
+            last_hit_label,
+            prev_hit_label,
             hit_p,
-            normal,
+            normal_eff,
             incoming_dir,
-            incoming_dir,
-            ray.power,
+            None,
             extra={
                 "power_in": P_in,
-                "power_out": 0.0,
-                "note": "power split into spectral rays",
-                "num_children": len(spawned_rays),
-            },
-        )
-
-    # ==================================================
-    # ABSORBER
-    # ==================================================
-    else:
-        absorption = props.get("Absorption", 0.0)
-
-        # --- Energiuppdelning ---
-        P_in = ray.power
-        P_abs = P_in * absorption
-        P_out = P_in - P_abs
-
-        # --- Uppdatera ray ---
-        ray.power = P_out
-        ray.add_segment(
-            hit_p,
-            interaction_type="absorb",
-            hit_face=target_label,
-        )
-
-        # --- Logga interaktion ---
-        ray.log_bounce(
-            props["Name"],
-            o_type,
-            target_label,
-            hit_p,
-            normal,
-            incoming_dir,
-            incoming_dir,
-            ray.power,  # kvarvarande power
-            extra={
                 "absorbed_power": P_abs,
-                "absorption": absorption,
-                "power_in": P_in,
+                "transmitted_power": P_out,
             },
         )
+
+    # else:
+    #     absorption = props.get("Absorption", 0.0)
+    #     P_in = ray.power
+    #     P_abs = P_in * absorption
+    #     ray.power = P_in - P_abs
+
+    #     ray.log_bounce(
+    #         props["Name"],
+    #         o_type,
+    #         last_hit_label,
+    #         prev_hit_label,
+    #         # target_label,
+    #         # prev_face,
+    #         hit_p,
+    #         normal_eff,
+    #         incoming_dir,
+    #         incoming_dir,
+    #         # ray.power,
+    #         extra={"absorbed_power": P_abs, "absorption": absorption, "power_in": P_in, "power_out": ray.power},
+    #     )
 
     return spawned_rays
 
@@ -954,7 +690,8 @@ def propagate_occ(ray, ray_targets, max_bounce, max_length):
 
         # --- NO HIT ---
         if not hit_data:
-            ray.add_segment(origin + direction * max_length, "Void")
+            ray.add_segment(origin + direction * max_length, interaction_type="Void")
+            # ray.add_segment(origin + direction * max_length, "Void")
             break
 
         target, hit_p = hit_data
@@ -970,11 +707,22 @@ def propagate_occ(ray, ray_targets, max_bounce, max_length):
 
         incoming_dir = direction
 
-        ray.add_segment(hit_p, target["label"], hit_face=face)
+        prev_face = ray.last_hit_label  # ✅  Måste vara före add_segemnt
+
+        ray.add_segment(hit_p, hit_face_label=target["label"])
         ray.bounce_count += 1
 
         # --- OPTICS ---
-        spawned = handle_optical_interaction(ray, hit_p, normal, incoming_dir, props, target["label"])
+
+        spawned = handle_optical_interaction(
+            ray,
+            hit_p,
+            normal,
+            incoming_dir,
+            props,
+            # target["label"],
+            # prev_face,
+        )
 
         for child in spawned:
             propagate_occ(child, ray_targets, max_bounce, max_length)
@@ -1031,7 +779,8 @@ def propagate_mesh(ray, mesh_targets, max_bounce, max_length):
 
         # --- NO HIT ---
         if not best_hit:
-            ray.add_segment(origin + direction * max_length, "Void")
+            ray.add_segment(origin + direction * max_length, interaction_type="Void")
+            # ray.add_segment(origin + direction * max_length, "Void")
             break
 
         target, tid, u, v, hit_p = best_hit
@@ -1053,11 +802,17 @@ def propagate_mesh(ray, mesh_targets, max_bounce, max_length):
 
         incoming_dir = direction
 
-        ray.add_segment(hit_p, target["label"], hit_face=target["face"])
+        # prev_face = str(ray.last_hit_face) if ray.last_hit_face is not None else None  # ✅ stabil sträng, Måste vara före add_segemnt
+
+        # prev_face = ray.last_hit_label
+
+        # ray.add_segment(hit_p, target["label"], origin_face=target["face"], origin_label=target["label"])
+        # ray.add_segment(hit_p, target["label"], hit_face=target["face"])  # , origin_label=target["label"])
+        ray.add_segment(hit_p, hit_face_label=target["label"])  # skickar med label för att sätta last_hit_face_label
         ray.bounce_count += 1
 
         # --- OPTICS ---
-        spawned = handle_optical_interaction(ray, hit_p, normal, incoming_dir, props, target["label"])
+        spawned = handle_optical_interaction(ray, hit_p, normal, incoming_dir, props)  # , prev_face)
 
         for child in spawned:
             propagate_mesh(child, mesh_targets, max_bounce, max_length)

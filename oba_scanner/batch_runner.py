@@ -3,56 +3,174 @@
 
 import json
 import math
+from pydoc import doc
 import time
+
+
 import FreeCAD as App
-from PySide import QtGui
-import numpy as np
 
-from oba_rayengine.oba_ray_core import OBARayManager
-from .scan_db import HitsDB  # behålls som dummy / framtida
+from oba_objects.oba_base import _trigger_ray_engine
 
-
-PRINT_DEBUGG = False
+BATCH_OFFSET_OBJ = "__OBABatchOffset__"
 
 
 # ============================================================
-# Math helpers
+# Math helper
 # ============================================================
+
+
 def rotate(x, y, z, axis, angle_rad):
     c = math.cos(angle_rad)
     s = math.sin(angle_rad)
     axis = axis.upper()
-
     if axis == "X":
         return (x, y * c - z * s, y * s + z * c)
     elif axis == "Y":
         return (x * c + z * s, y, -x * s + z * c)
-    else:  # Z
+    else:
         return (x * c - y * s, x * s + y * c, z)
 
 
-def fmt_time(sec):
-    sec = max(0, int(sec))
-    m, s = divmod(sec, 60)
-    h, m = divmod(m, 60)
-    if h > 0:
-        return f"{h:02d}:{m:02d}:{s:02d}"
-    return f"{m:02d}:{s:02d}"
+# ============================================================
+# Batch offset controller
+# ============================================================
+
+
+def dump_placement_text(obj, header=None):
+    """
+    Skriver ut Placement-innehållet för ett objekt:
+    - numeriska värden
+    - expressions (om de finns)
+    som ren text i FreeCAD-konsolen.
+    """
+    if not obj:
+        App.Console.PrintError("❌ dump_placement_text: inget objekt\n")
+        return
+
+    if header:
+        App.Console.PrintLog(f"\n=== {header} ===\n")
+    else:
+        App.Console.PrintLog(f"\n=== Placement dump: {obj.Name} ===\n")
+
+    pl = obj.Placement
+    base = pl.Base
+    rot = pl.Rotation
+
+    App.Console.PrintLog(f"Base values:\n" f"  x = {base.x}\n" f"  y = {base.y}\n" f"  z = {base.z}\n")
+
+    axis = rot.Axis
+    App.Console.PrintLog(f"Rotation values:\n" f"  axis = ({axis.x}, {axis.y}, {axis.z})\n" f"  angle(rad) = {rot.Angle}\n" f"  angle(deg) = {math.degrees(rot.Angle)}\n")
+
+    # --------------------------------------------------
+    # Expressions (om några)
+    # --------------------------------------------------
+    ee = obj.ExpressionEngine
+    if ee:
+        App.Console.PrintLog("Placement expressions:\n")
+        for path, expr in ee:
+            if path.startswith(".Placement"):
+                App.Console.PrintLog(f"  {path} = {expr}\n")
+    else:
+        App.Console.PrintLog("No expressions on Placement\n")
+
+
+def set_batch_offsets(batch_obj, dx, dy, dz):
+    batch_obj.OffsetX = dx
+    batch_obj.OffsetY = dy
+    batch_obj.OffsetZ = dz
 
 
 # ============================================================
-# DUMMY DB HOOK (INTENTIONALLY NO-OP)
+# SAFE EXPRESSION INSTALLER
 # ============================================================
-def record_step_result_dummy(batch, step, offset):
-    """
-    Placeholder for future persistence.
-    Currently NO-OP by design.
 
-    offset = (dx, dy, dz) is the ONLY meaningful coordinate.
+
+def snapshot_placement(obj):
     """
-    # Example future hook:
-    # db.write_hit(batch.GroupId, step.Id, dx, dy, dz, stats)
-    return
+    Returnerar en snapshot av Placement:
+    - numeriska värden
+    - alla placement-expressions som ren text
+    """
+    pl = obj.Placement
+    b = pl.Base
+    snap = {
+        "base": App.Vector(b.x, b.y, b.z),
+        "rotation": App.Rotation(pl.Rotation),
+        "expressions": {},
+    }
+    ee = obj.ExpressionEngine
+    if ee:
+        for path, expr in ee:
+            if path.startswith(".Placement"):
+                snap["expressions"][path.lstrip(".")] = expr
+
+    return snap
+
+
+def clear_placement_expressions(obj):
+    ee = obj.ExpressionEngine
+    if not ee:
+        return
+
+    for path, _expr in list(ee):  # list() ← viktigt
+        if path.startswith(".Placement"):
+            obj.setExpression(path.lstrip("."), None)
+
+
+def apply_direct_offset(obj, snap, dx, dy, dz):
+    base0 = snap["base"]
+    obj.Placement.Base = App.Vector(
+        base0.x + dx,
+        base0.y + dy,
+        base0.z + dz,
+    )
+
+
+def restore_placement(obj, snap):
+    # Återställ värden först
+    obj.Placement.Base = snap["base"]
+    obj.Placement.Rotation = snap["rotation"]
+
+    # Återställ expressions
+    for path, expr in snap["expressions"].items():
+        obj.setExpression(path, expr)
+
+
+def dump_snapshot(snap):
+    App.Console.PrintLog(f"Base: {snap['base']}\n" f"Rotation: {snap['rotation']}\n")
+    for p, e in snap["expressions"].items():
+        App.Console.PrintLog(f"Expr {p} = {e}\n")
+
+
+def resolve_move_target(obj):
+    """
+    Returnerar det objekt vars Placement faktiskt styr geometrin.
+    """
+    if not obj:
+        return None
+
+    # Case 1: PartDesign Body
+    if obj.TypeId == "PartDesign::Body":
+        return obj
+
+    # Case 2: Feature inne i Body → flytta Body
+    try:
+        body = obj.getParentGeoFeatureGroup()
+        if body and body.TypeId == "PartDesign::Body":
+            return body
+    except Exception:
+        pass
+
+    # Case 3: App::Link
+    if obj.TypeId == "App::Link":
+        return obj  # eller obj.LinkedObject beroende på policy
+
+    # Case 4: Vanligt Part / Feature
+    if hasattr(obj, "Placement"):
+        return obj
+
+    # Annars: ogiltigt
+    return None
 
 
 # ============================================================
@@ -60,19 +178,10 @@ def record_step_result_dummy(batch, step, offset):
 # ============================================================
 
 
-# ----------------------------------------------------------
-# Placement snapshot / restore
-# ----------------------------------------------------------
-
-
 def run_steps_for_batch(batch, prog_bar, status_lbl, pump_events_func, stop_flag_func):
-    """
-    Kör batch‑steg, samlar ray‑hits och skriver energibokföring till DB.
-    """
 
     App.Console.PrintLog("▶ Starting batch run\n")
 
-    import json, math, time
     from oba_rayengine.oba_ray_analyser import collect_ray_hits_and_stats
     from .scan_db import HitsDB
 
@@ -82,33 +191,31 @@ def run_steps_for_batch(batch, prog_bar, status_lbl, pump_events_func, stop_flag
     # ----------------------------------------------------------
     # Find OBARayConfig
     # ----------------------------------------------------------
+
     collector = None
-    for obj in doc.Objects:
-        if hasattr(obj, "Proxy") and obj.Proxy and obj.Proxy.__class__.__name__ == "OBARayConfig":
-            collector = obj
+    for o in doc.Objects:
+        if hasattr(o, "Proxy") and o.Proxy and o.Proxy.__class__.__name__ == "OBARayConfig":
+            collector = o
             break
 
-    if collector is None:
+    if not collector:
         status_lbl.setText("No OBARayConfig – aborting")
         App.Console.PrintError("❌ OBARayConfig missing\n")
         return
 
-    # Disable debounce for performance
-    try:
-        collector.DisableDebounce = True
-        App.Console.PrintLog("✅ RayCollector.DisableDebounce = True\n")
-    except Exception:
-        App.Console.PrintError("⚠️ Could not set DisableDebounce\n")
+    collector.RunMode = "MANUAL"
 
     # ----------------------------------------------------------
     # Collect active steps
     # ----------------------------------------------------------
-    steps = [s for s in batch.Group if s.TypeId.startswith("App::FeaturePython") and getattr(s, "Active", True)]
 
     parsed_steps = []
     total_iters = 0
 
-    for step in steps:
+    for step in batch.Group:
+        if not getattr(step, "Active", True):
+            continue
+
         try:
             data = json.loads(step.DataJSON or "{}")
         except Exception:
@@ -121,6 +228,7 @@ def run_steps_for_batch(batch, prog_bar, status_lbl, pump_events_func, stop_flag
 
         iters = A * R - (A - 1) if rf == 0 else A * R
         total_iters += iters
+
         parsed_steps.append((step, data, A, rf, rt, R))
 
     prog_bar.setRange(0, total_iters)
@@ -129,57 +237,71 @@ def run_steps_for_batch(batch, prog_bar, status_lbl, pump_events_func, stop_flag
     # ----------------------------------------------------------
     # Label → Name map
     # ----------------------------------------------------------
-    label_to_name = {obj.Label: obj.Name for obj in doc.Objects}
+
+    label_to_name = {o.Label: o.Name for o in doc.Objects}
 
     # ----------------------------------------------------------
-    # Snapshot initial placements
+    # Collect move-objects + snapshot Placement
     # ----------------------------------------------------------
-    global_initial_positions = {}
+
+    move_objects = {}
+    placement_snaps = {}
 
     for step, data, *_ in parsed_steps:
         for lbl in (data.get("move"), data.get("move1"), data.get("move2")):
             if not lbl or lbl == "none":
                 continue
-            obj = doc.getObject(label_to_name.get(lbl, ""))
-            if obj and lbl not in global_initial_positions:
-                global_initial_positions[lbl] = obj.Placement.Base
 
+            raw_obj = doc.getObject(label_to_name.get(lbl, ""))
+            move_obj = resolve_move_target(raw_obj)
+
+            if not move_obj:
+                App.Console.PrintWarning(f"[Batch] Object '{lbl}' cannot be moved (ignored)\n")
+                continue
+
+            key = move_obj.Name
+            if key in move_objects:
+                continue
+
+            move_objects[key] = move_obj
+            placement_snaps[key] = snapshot_placement(move_obj)
+            dump_placement_text(move_obj, header=f"Original placement for {move_obj.Name}")
+
+            clear_placement_expressions(move_obj)
+
+    doc.recompute()
     # ----------------------------------------------------------
     # RUN
     # ----------------------------------------------------------
-    start_time = time.time()
     done_iters = 0
-    last_ui_update = 0.0
-    UI_UPDATE_INTERVAL = 0.4
 
     try:
         for step, data, A, rf, rt, R in parsed_steps:
             if stop_flag_func():
                 break
 
+            step_move_names = []  # för att lagra i DB senare
+            for lbl in (data.get("move"), data.get("move1"), data.get("move2")):
+                if not lbl or lbl == "none":
+                    continue
+                name = label_to_name.get(lbl)
+                if name:
+                    step_move_names.append(name)
+            moved_objects_as_str = ";".join(sorted(step_move_names))
+
             plan = data.get("plan", "XY")
-            targets = [t for t in (data.get("move"), data.get("move1"), data.get("move2")) if t and t != "none"]
-
             rot_axis = data.get("rotAxis", "X")
-            rot_angle_rad = math.radians(float(data.get("rotAngle", 0.0)))
-
-            initial_positions = {lbl: global_initial_positions[lbl] for lbl in targets if lbl in global_initial_positions}
+            rot_angle = math.radians(float(data.get("rotAngle", 0.0)))
 
             r_step = 0 if R <= 1 else (rt - rf) / float(R - 1)
 
-            doc.openTransaction(f"Run {step.Label}")
-
             for ri in range(R):
-                if stop_flag_func():
-                    break
-
                 radius = rf + r_step * ri
-                ai_range = range(1) if (ri == 0 and abs(radius) < 1e-12) else range(A)
+                ai_range = range(1) if ri == 0 and abs(radius) < 1e-12 else range(A)
 
                 for ai in ai_range:
                     if stop_flag_func():
                         break
-
                     pump_events_func()
 
                     ang = (2.0 * math.pi / A) * ai
@@ -191,33 +313,24 @@ def run_steps_for_batch(batch, prog_bar, status_lbl, pump_events_func, stop_flag
                         dz, dy = dy, 0.0
                     elif plan == "YZ":
                         dx, dy, dz = 0.0, dx, dy
-
-                    from .batch_runner import rotate
-
-                    dx, dy, dz = rotate(dx, dy, dz, rot_axis, rot_angle_rad)
-
+                    dx, dy, dz = rotate(dx, dy, dz, rot_axis, rot_angle)
                     # ----------------------------------------------
-                    # Move objects
+                    # Apply offset ONLY to move objects
                     # ----------------------------------------------
-                    for lbl in targets:
-                        obj = doc.getObject(label_to_name.get(lbl, ""))
-                        base0 = initial_positions.get(lbl)
-                        if not obj or not base0:
-                            continue
+                    for name, move_obj in move_objects.items():
+                        snap = placement_snaps[name]
+                        # print("Moving", move_obj.Name, move_obj.TypeId)
+                        apply_direct_offset(move_obj, snap, dx, dy, dz)
+                        # dump_placement_text(move_obj, f"After offset dx={dx:.3f} dy={dy:.3f}")
+                    doc.recompute()
+                    # ----------------------------------------------
+                    # ANALYSIS
+                    # ----------------------------------------------
 
-                        obj.Placement.Base = App.Vector(
-                            base0.x + dx,
-                            base0.y + dy,
-                            base0.z + dz,
-                        )
+                    _trigger_ray_engine(reason="Manual trace for scanner steps", source=None, force=True)
 
-                    # ----------------------------------------------
-                    # ANALYSIS → DB
-                    # ----------------------------------------------
                     hits, _stats = collect_ray_hits_and_stats(mode="final")
                     doc_name = f"{doc.Name}_{batch.Label}_{step.Id}"
-
-                    # (target, emitter) → accumulator
                     accum = {}
 
                     for hit in hits:
@@ -231,28 +344,25 @@ def run_steps_for_batch(batch, prog_bar, status_lbl, pump_events_func, stop_flag
 
                         optical_type = getattr(obj, "OpticalType", "UNKNOWN")
                         emitter = hit.get("emitter_id") or "__UNKNOWN__"
-
                         key = (target, emitter)
 
-                        if key not in accum:
-                            accum[key] = {
+                        acc = accum.setdefault(
+                            key,
+                            {
                                 "count": 0,
                                 "power_in": 0.0,
                                 "power_out": 0.0,
                                 "absorbed_power": 0.0,
                                 "optical_type": optical_type,
-                            }
+                            },
+                        )
 
-                        accum[key]["count"] += 1
-                        accum[key]["power_in"] += hit.get("power_in") or 0.0
-                        accum[key]["power_out"] += hit.get("power_out") or 0.0
-                        accum[key]["absorbed_power"] += hit.get("absorbed_power") or 0.0
+                        acc["count"] += 1
+                        acc["power_in"] += hit.get("power_in") or 0.0
+                        acc["power_out"] += hit.get("power_out") or 0.0
+                        acc["absorbed_power"] += hit.get("absorbed_power") or 0.0
 
-                    # ----------------------------------------------
-                    # Write DB rows (per emitter + ALL)
-                    # ----------------------------------------------
                     rows = []
-
                     for (target, emitter), info in accum.items():
                         rows.append(
                             (
@@ -260,6 +370,7 @@ def run_steps_for_batch(batch, prog_bar, status_lbl, pump_events_func, stop_flag
                                 target,
                                 emitter,
                                 info["optical_type"],
+                                moved_objects_as_str,  # exempel "Mirror001;Lens002"
                                 dx,
                                 dy,
                                 dz,
@@ -269,13 +380,13 @@ def run_steps_for_batch(batch, prog_bar, status_lbl, pump_events_func, stop_flag
                                 info["absorbed_power"],
                             )
                         )
-
                         rows.append(
                             (
                                 doc_name,
                                 target,
                                 "__ALL__",
                                 info["optical_type"],
+                                moved_objects_as_str,
                                 dx,
                                 dy,
                                 dz,
@@ -288,277 +399,28 @@ def run_steps_for_batch(batch, prog_bar, status_lbl, pump_events_func, stop_flag
 
                     if rows:
                         db.write_hits_batch(rows)
+
+                    done_iters += 1
+                    if done_iters % 20 == 0:
                         db.commit()
 
-                    # ----------------------------------------------
-                    # UI / ETA
-                    # ----------------------------------------------
-                    done_iters += 1
-                    now = time.time()
-
-                    if now - last_ui_update > UI_UPDATE_INTERVAL:
-                        last_ui_update = now
-                        prog_bar.setValue(done_iters)
-
-                        elapsed = now - start_time
-                        speed = done_iters / elapsed if elapsed > 0 else 0
-                        rem = (total_iters - done_iters) / speed if speed > 0 else 0
-
-                        status_lbl.setText(f"{step.Id} | {done_iters}/{total_iters} | " f"⏱ {int(elapsed)} s / ⏳ {int(rem)} s")
-                        pump_events_func()
-
-            doc.commitTransaction()
-            doc.recompute()
+                    prog_bar.setValue(done_iters)
 
     finally:
         # ------------------------------------------------------
-        # Restore initial placements
+        # RESTORE ORIGINAL PLACEMENT
         # ------------------------------------------------------
-        doc.openTransaction("Restore positions")
+        db.commit()
 
-        for lbl, base in global_initial_positions.items():
-            obj = doc.getObject(label_to_name.get(lbl, ""))
+        for name, snap in placement_snaps.items():
+            obj = move_objects.get(name)
             if obj:
-                obj.Placement.Base = base
+                App.Console.PrintLog(f"Restoring {obj.Name}\n")
+                restore_placement(obj, snap)
 
-        try:
-            collector.DisableDebounce = False
-            App.Console.PrintLog("✅ RayCollector.DisableDebounce restored\n")
-        except Exception:
-            App.Console.PrintError("⚠️ Could not restore DisableDebounce\n")
-
-        doc.commitTransaction()
         doc.recompute()
 
-        status_lbl.setText("Stopped" if stop_flag_func() else "Done")
-
-
-def run_steps_for_batch_old(batch, prog_bar, status_lbl, pump_events_func, stop_flag_func):
-
-    App.Console.PrintLog("▶ Starting batch run\n")
-
-    import json, math, time
-    from raytracer.oba_ray import OBARayManager
-    from .scan_db import HitsDB
-    from raytracer.oba_ray_analyser import collect_ray_hits_and_stats
-
-    doc = batch.Document
-    db = HitsDB()
-
-    # ----------------------------------------------------------
-    # Find OBARayConfig
-    # ----------------------------------------------------------
-    collector = None
-    for obj in doc.Objects:
-        if hasattr(obj, "Proxy") and obj.Proxy and obj.Proxy.__class__.__name__ == "OBARayConfig":
-            collector = obj
-            break
-
-    if collector is None:
-        status_lbl.setText("No OBARayConfig – aborting")
-        App.Console.PrintError("❌ OBARayConfig missing\n")
-        return
-
-    # Disable debounce for performance
-    try:
-        collector.DisableDebounce = True
-        App.Console.PrintLog("✅ RayCollector.DisableDebounce = True\n")
-    except Exception:
-        App.Console.PrintError("⚠️ Could not set DisableDebounce\n")
-
-    # ----------------------------------------------------------
-    # Collect active steps
-    # ----------------------------------------------------------
-    steps = [s for s in batch.Group if s.TypeId.startswith("App::FeaturePython") and getattr(s, "Active", True)]
-
-    parsed_steps = []
-    total_iters = 0
-
-    for step in steps:
-        try:
-            data = json.loads(step.DataJSON or "{}")
-        except Exception:
-            data = {}
-
-        A = max(1, int(data.get("angle", 5)))
-        rf = float(data.get("rf", 0.0))
-        rt = float(data.get("rt", 0.4))
-        R = max(1, int(data.get("rs", 4)))
-
-        iters = A * R - (A - 1) if rf == 0 else A * R
-        total_iters += iters
-
-        parsed_steps.append((step, data, A, rf, rt, R))
-
-    prog_bar.setRange(0, total_iters)
-    prog_bar.setValue(0)
-
-    # ----------------------------------------------------------
-    # Label → Name map
-    # ----------------------------------------------------------
-    label_to_name = {obj.Label: obj.Name for obj in doc.Objects}
-
-    # ----------------------------------------------------------
-    # Snapshot initial placements
-    # ----------------------------------------------------------
-    global_initial_positions = {}
-
-    for step, data, *_ in parsed_steps:
-        for lbl in (data.get("move"), data.get("move1"), data.get("move2")):
-            if not lbl or lbl == "none":
-                continue
-            obj = doc.getObject(label_to_name.get(lbl, ""))
-            if obj and lbl not in global_initial_positions:
-                global_initial_positions[lbl] = obj.Placement.Base
-
-    # ----------------------------------------------------------
-    # RUN
-    # ----------------------------------------------------------
-    start_time = time.time()
-    done_iters = 0
-    last_ui_update = 0.0
-    UI_UPDATE_INTERVAL = 0.4
-
-    try:
-        for step, data, A, rf, rt, R in parsed_steps:
-            if stop_flag_func():
-                break
-
-            plan = data.get("plan", "XY")
-            targets = [t for t in (data.get("move"), data.get("move1"), data.get("move2")) if t and t != "none"]
-
-            rot_axis = data.get("rotAxis", "X")
-            rot_angle_rad = math.radians(float(data.get("rotAngle", 0.0)))
-
-            initial_positions = {lbl: global_initial_positions[lbl] for lbl in targets if lbl in global_initial_positions}
-
-            r_step = 0 if R <= 1 else (rt - rf) / float(R - 1)
-
-            doc.openTransaction(f"Run {step.Label}")
-
-            for ri in range(R):
-                if stop_flag_func():
-                    break
-
-                radius = rf + r_step * ri
-                ai_range = range(1) if (ri == 0 and abs(radius) < 1e-12) else range(A)
-
-                for ai in ai_range:
-                    if stop_flag_func():
-                        break
-
-                    pump_events_func()
-
-                    ang = (2.0 * math.pi / A) * ai
-                    dx = radius * math.cos(ang)
-                    dy = radius * math.sin(ang)
-                    dz = 0.0
-
-                    if plan == "XZ":
-                        dz, dy = dy, 0.0
-                    elif plan == "YZ":
-                        dx, dy, dz = 0.0, dx, dy
-
-                    # rotation
-                    from .batch_runner import rotate
-
-                    dx, dy, dz = rotate(dx, dy, dz, rot_axis, rot_angle_rad)
-
-                    # ----------------------------------------------
-                    # Move objects
-                    # ----------------------------------------------
-                    for lbl in targets:
-                        obj = doc.getObject(label_to_name.get(lbl, ""))
-                        base0 = initial_positions.get(lbl)
-                        if not obj or not base0:
-                            continue
-
-                        obj.Placement.Base = App.Vector(
-                            base0.x + dx,
-                            base0.y + dy,
-                            base0.z + dz,
-                        )
-
-                    # ----------------------------------------------
-                    # ANALYSIS → DB (central punkt)
-                    # ----------------------------------------------
-                    hits, stats = collect_ray_hits_and_stats(mode="final")
-
-                    doc_name = f"{doc.Name}_{batch.Label}_{step.Id}"
-                    offset = (dx, dy, dz)
-
-                    # Samla (OpticalType, Emitter) → count
-                    accum = {}
-
-                    for hit in hits:
-                        target = hit.get("object")  # ← Mirror1, Lens3, Absorber01
-                        if not target:
-                            continue
-
-                        obj = doc.getObject(target)
-                        if not obj:
-                            continue
-
-                        optical_type = getattr(obj, "OpticalType", "UNKNOWN")
-                        emitter = hit.get("emitter_id") or "__UNKNOWN__"
-
-                        key = (target, emitter)
-
-                        accum.setdefault(key, {"count": 0, "power": 0.0, "optical_type": optical_type})
-                        accum[key]["count"] += 1
-                        accum[key]["power"] += hit.get("power", 0.0)
-
-                        # Skriv till DB: per emitter + ALL
-                        # for (target, emitter), info in accum.items():
-                        #     db.write_hit(doc_name, target_object=target, emitter_id=emitter, optical_type=info["optical_type"], x=dx, y=dy, z=dz, hits=info["count"])  # ← Mirror1  # ← Mirror
-                        #     # ALL‑aggregering per objekt
-                        #     db.write_hit(doc_name, target_object=target, emitter_id="__ALL__", optical_type=info["optical_type"], x=dx, y=dy, z=dz, hits=info["count"])
-
-                        rows = []
-                        for (target, emitter), info in accum.items():
-                            rows.append((doc_name, target, emitter, info["optical_type"], dx, dy, dz, info["count"], info["power"]))
-                            rows.append((doc_name, target, "__ALL__", info["optical_type"], dx, dy, dz, info["count"], info["power"]))
-                        db.write_hits_batch(rows)
-                        db.commit()
-
-                    # ----------------------------------------------
-                    # UI / ETA
-                    # ----------------------------------------------
-                    done_iters += 1
-                    now = time.time()
-
-                    if now - last_ui_update > UI_UPDATE_INTERVAL:
-                        last_ui_update = now
-                        prog_bar.setValue(done_iters)
-
-                        elapsed = now - start_time
-                        speed = done_iters / elapsed if elapsed > 0 else 0
-                        rem = (total_iters - done_iters) / speed if speed > 0 else 0
-
-                        status_lbl.setText(f"{step.Id} | {done_iters}/{total_iters} | " f"⏱ {int(elapsed)} s / ⏳ {int(rem)} s")
-                        pump_events_func()
-
-            doc.commitTransaction()
-            doc.recompute()
-
-    finally:
-        # ------------------------------------------------------
-        # Restore initial placements
-        # ------------------------------------------------------
-        doc.openTransaction("Restore positions")
-
-        for lbl, base in global_initial_positions.items():
-            obj = doc.getObject(label_to_name.get(lbl, ""))
-            if obj:
-                obj.Placement.Base = base
-
-        try:
-            collector.DisableDebounce = False
-            App.Console.PrintLog("✅ RayConfig.DisableDebounce restored\n")
-        except Exception:
-            App.Console.PrintError("⚠️ Could not restore DisableDebounce\n")
-
-        doc.commitTransaction()
-        doc.recompute()
+        collector.RunMode = "AUTO"
+        _trigger_ray_engine(reason="batch_finished", force=True)
 
         status_lbl.setText("Stopped" if stop_flag_func() else "Done")

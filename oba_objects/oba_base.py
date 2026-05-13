@@ -39,7 +39,7 @@ def _rayengine_debug_hook(reason="", source=None, engine=None):
     App.Console.PrintMessage(f"[OBA-RAY] trigger from={src} reason='{reason}'\n")
 
 
-def _trigger_ray_engine(reason="", source=None):
+def _trigger_ray_engine(reason="", source=None, force=False):
     """
     Central dispatcher för ray tracing.
 
@@ -80,6 +80,7 @@ def _trigger_ray_engine(reason="", source=None):
     OBARayEngine.instance().notify_event(
         reason=reason,
         source=source,
+        force=force,
     )
 
 
@@ -161,7 +162,7 @@ class OBARealtimeObserver:
     # HUVUDEVENT: objekt ändrat
     # --------------------------------------------------
 
-    def is_manual_translation(self):
+    def is_manual_translation_old(self):
         import FreeCADGui as Gui
 
         # 1. Kolla om ett relevant GUI-kommando körs
@@ -169,6 +170,26 @@ class OBARealtimeObserver:
 
         # 2. Kolla om användaren aktivt redigerar ett värde i Task-panelen
         # (Hjälper om de ändrar Placement manuellt i panelen)
+        is_editing = Gui.Control.activeDialog() is not None
+
+        return active_cmd or is_editing
+
+    def is_manual_translation(self):
+        import FreeCADGui as Gui
+
+        # 1. Kolla om ett relevant GUI-kommando körs (med felsäkring)
+        active_cmd = False
+        for cmd_name in ("Std_TransformManip", "Std_Transform", "Draft_Move", "Draft_Rotate"):
+            try:
+                # Kontrollera först att kommandot finns för att undvika 'NoneType'-fel internt
+                cmd = Gui.Command.get(cmd_name)
+                if cmd and Gui.isCommandActive(cmd_name):
+                    active_cmd = True
+                    break
+            except Exception:
+                continue
+
+        # 2. Kolla om användaren aktivt redigerar ett värde i Task-panelen
         is_editing = Gui.Control.activeDialog() is not None
 
         return active_cmd or is_editing
@@ -184,6 +205,8 @@ class OBARealtimeObserver:
         if not doc:
             return
 
+        # print("[oba base] slotchangedobject", obj.Name, prop, is_interactive_transform())
+
         affected = self._affected_optical_objects(doc, obj)
         if not affected:
             return
@@ -191,6 +214,7 @@ class OBARealtimeObserver:
         # ✅ GUARD: endast MANUELL translation
         if not self.is_manual_translation():
             # Python / script / recompute → ignorera
+            # print("[oba base] manual translation")
             return
 
         # print("\n drag_körs..")
@@ -201,9 +225,9 @@ class OBARealtimeObserver:
         for opt in affected:
             self._dirty_sources.add(opt)
 
-        if self._flush_timer.isActive():
-            self._flush_timer.stop()
-        # debounce till commit-fasen
+        # if self._flush_timer.isActive():
+        #     self._flush_timer.stop()
+        # # debounce till commit-fasen
         self._flush_timer.start(0)
 
     def _affected_optical_objects(self, doc, changed_obj):
@@ -222,6 +246,37 @@ class OBARealtimeObserver:
                     continue
 
                 src = b.Support[0][0]
+
+                # Direkta träffen
+                if src is changed_obj:
+                    affected.append(opt)
+                    break
+
+                # Body → Feature → Binder
+                if changed_obj.isDerivedFrom("PartDesign::Body") and src.isDerivedFrom("PartDesign::Feature") and src.getParentGeoFeatureGroup() is changed_obj:
+                    affected.append(opt)
+                    break
+
+        return affected
+
+    def _affected_optical_objects_old(self, doc, changed_obj):
+        """
+        Returnerar lista av optiska objekt som påverkas
+        av förändringen i changed_obj.
+        """
+        affected = []
+
+        for opt in doc.findObjects("App::DocumentObjectGroupPython"):
+            if not hasattr(opt, "Binders"):
+                continue
+
+            for b in opt.Binders:
+                if not b.Support:
+                    continue
+
+                src = b.Support[0][0]
+                print(f"Checking {opt.Name} binder source {src.Name} against changed {changed_obj.Name}, src type {type(src)}, changed type {type(changed_obj)}")
+
                 if src is changed_obj:
                     affected.append(opt)
                     break
@@ -349,7 +404,7 @@ class OBAElementProxy:
         Körs när en property på objektet ändras
         """
 
-        print("\n onchanged_körs", is_interactive_transform())
+        # print("\n [oba_base] onchanged_körs", is_interactive_transform())
 
         # Ignorera interna FreeCAD-properties
         if prop.startswith("_"):
@@ -484,14 +539,39 @@ class OBAElementProxy:
 
         return b.Support[0][0]
 
+    def _resolve_geometry_root(self, src):
+        """
+        Returnerar ett stabilt geometriskt rotobjekt
+        (Body, importerad STEP, eller primär Form).
+        """
+        # PartDesign Feature → Body
+        if src.isDerivedFrom("PartDesign::Feature"):
+            body = src.getParentGeoFeatureGroup()
+            if body:
+                return body
+        # Binder → dess Support
+        if hasattr(src, "Support") and src.Support:
+            return self._resolve_geometry_root(src.Support[0][0])
+        # Importerat STEP / Compound
+        if src.isDerivedFrom("Part::Feature"):
+            return src
+        # Fallback
+        return src
+
+    def _optical_prefix(self, obj):
+        ot = getattr(obj, "OpticalType", "OPT").upper()
+        return ot[:3]  # MIR, LEN, ABS, GRA…
+
     def _update_label_from_binders(self, obj):
         src = self._get_binder_source_object(obj)
         if not src:
             return
-        base = getattr(obj, "OpticalType", "Optic")
-        new_name = f"{base}_{src.Name}"
-        if obj.Name != new_name and not obj.Document.getObject(new_name):
-            obj.Label = new_name  # använd Label, inte Name
+        root = self._resolve_geometry_root(src)
+        prefix = self._optical_prefix(obj)
+        geom_name = root.Label or root.Name
+        new_label = f"{prefix}_{geom_name}"
+        if obj.Label != new_label:
+            obj.Label = new_label
 
     def __getstate__(self):
         return None
