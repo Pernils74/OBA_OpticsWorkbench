@@ -15,7 +15,10 @@ import numpy as np
 
 from .cluster_core import *
 from oba_rayengine.oba_ray_core import OBARayManager
-from oba_rayengine.oba_ray_analyser import collect_ray_hits_and_stats
+from oba_rayengine.oba_ray_analyser import aggregate_path_statistics
+from oba_rayengine.oba_ray_analyser import debug_print_surface_clusters, aggregate_interaction_clusters
+
+
 from .show_xyz_live_list import OBA_ShowXYZLiveList
 from .filter_panel import ClusterHitFilterPanel
 
@@ -177,15 +180,37 @@ class ClusterPlotDialog(QtWidgets.QDialog):
     # -------------------------------------------------
     # MAIN DRAW
     # -------------------------------------------------
+
     def reload_plot(self):
         mode = self.cmbMode.currentText()
-        hits, stats = collect_ray_hits_and_stats(None if mode == "all" else "final")
-
-        filter_spec = self.filterPanel.get_filter_spec()
         plane = self.cmbPlane.currentText()
         flip2d = self.chkFlip.isChecked()
 
-        # -------- 2D --------
+        # -------------------------------------------------
+        # 1) HIT-DATA (för punkter, blobs, 3D)
+        # -------------------------------------------------
+        # hits, _ = collect_ray_hits_and_stats(None if mode == "all" else "final")
+
+        hits, _ = aggregate_path_statistics(mode="final")
+
+        # -------------------------------------------------
+        # 2) CLUSTERS (för centroids / footprint)
+        # -------------------------------------------------
+        clusters = aggregate_interaction_clusters(
+            mode=None if mode == "all" else "final",
+        )
+
+        # debug_print_surface_clusters(
+        #     plane=plane,
+        #     mode="final",
+        #     min_hits=3,
+        # )
+
+        filter_spec = self.filterPanel.get_filter_spec()
+
+        # -------------------------------------------------
+        # 2D PLOT
+        # -------------------------------------------------
         self.fig2d.clear()
         ax = self.fig2d.add_subplot(111)
 
@@ -193,16 +218,48 @@ class ClusterPlotDialog(QtWidgets.QDialog):
         mixer = ColorMixer(bounces)
         marker_map = {e: "o" for e in emitters}
 
-        draw_points(ax, hits, filter_spec, plane, flip2d, mixer, marker_map)
+        # --- Raw hit points ---
+        draw_points(
+            ax,
+            hits,
+            filter_spec,
+            plane,
+            flip2d,
+            mixer,
+            marker_map,
+        )
 
+        # --- Density blobs ---
         if self.chkBlobs.isChecked():
-            draw_blobs_2d(ax, hits, filter_spec, plane, flip2d, mixer, self.chkSmooth.isChecked())
+            draw_blobs_2d(
+                ax,
+                hits,
+                filter_spec,
+                plane,
+                flip2d,
+                mixer,
+                self.chkSmooth.isChecked(),
+            )
 
+        # --- Cluster centroids (YT-KLUSTER, inte path-stats) ---
         if self.chkCentroids.isChecked():
-            draw_centroids(ax, stats, filter_spec, plane, flip2d)
+            draw_cluster_centroids(
+                ax,
+                clusters,
+                filter_spec,
+                plane,
+                flip2d,
+            )
 
-        build_legends(ax, emitters, bounces, marker_map, mixer, hits)
+        # --- Legends ---
+        # build_legends(ax, emitters, bounces, marker_map, mixer, hits)
+        # Emitters legend (vänster, samma som tidigare)
+        build_emitter_legend(ax, emitters, marker_map)
 
+        # Bounce × Face legend (höger, baserad på KLUSTER)
+        build_bounce_flow_legend(ax, clusters, mixer)
+
+        # --- Axes options ---
         if self.chkEqual.isChecked():
             ax.set_aspect("equal")
         if self.chkGrid.isChecked():
@@ -210,10 +267,15 @@ class ClusterPlotDialog(QtWidgets.QDialog):
 
         self.canvas2d.draw_idle()
 
-        # -------- 3D --------
+        # -------------------------------------------------
+        # 3D PLOT (rå hits, oförändrat)
+        # -------------------------------------------------
         if self.chk3D.isChecked():
             self._draw_3d_plot(hits, filter_spec)
 
+        # -------------------------------------------------
+        # STATUS
+        # -------------------------------------------------
         self.lblStatus.setText(f"Hits: {len(hits)} | Emitters: {len(emitters)} | Objects: {len(objects)}")
 
     # -------------------------------------------------

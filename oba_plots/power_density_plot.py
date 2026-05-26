@@ -120,6 +120,9 @@ class PowerDensityPlotDialog(QtWidgets.QDialog):
         self.spnSigma.setValue(3.0)
         top.addWidget(self.spnSigma)
 
+        self.chkFlip = QtWidgets.QCheckBox("Flip")
+        top.addWidget(self.chkFlip)
+
         self.chkLog = QtWidgets.QCheckBox("Log")
         top.addWidget(self.chkLog)
 
@@ -204,6 +207,7 @@ class PowerDensityPlotDialog(QtWidgets.QDialog):
         self.spnSigma.valueChanged.connect(self.reload_plot)
 
         # CheckBoxes
+        self.chkFlip.stateChanged.connect(self.reload_plot)
         self.chkLog.stateChanged.connect(self.reload_plot)
         self.chkEqual.stateChanged.connect(self.reload_plot)
         self.chkGrid.stateChanged.connect(self.reload_plot)
@@ -253,13 +257,30 @@ class PowerDensityPlotDialog(QtWidgets.QDialog):
             if self.chkLog.isChecked():
                 H = np.log10(H + 1e-12)
 
+            H_plot = H.T
+            x0, x1 = xedges[0], xedges[-1]
+            y0, y1 = yedges[0], yedges[-1]
+
+            # 🔥 flip axes
+            if self.chkFlip.isChecked():
+                H_plot = H_plot.T
+                x0, x1, y0, y1 = y0, y1, x0, x1
+
             im = ax2d.imshow(
-                H.T,
+                H_plot,
                 origin="lower",
-                extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]],
+                extent=[x0, x1, y0, y1],
                 cmap="plasma",
                 aspect="equal" if self.chkEqual.isChecked() else "auto",
             )
+
+            # im = ax2d.imshow(
+            #     H.T,
+            #     origin="lower",
+            #     extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]],
+            #     cmap="plasma",
+            #     aspect="equal" if self.chkEqual.isChecked() else "auto",
+            # )
             self.fig2d.colorbar(im, ax=ax2d)
 
         self.canvas2d.draw_idle()

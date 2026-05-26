@@ -8,6 +8,7 @@ from collections import defaultdict, Counter
 import matplotlib.cm as cm
 from matplotlib.lines import Line2D
 from matplotlib.patches import Polygon
+from numpy import cov
 
 
 # -------------------------------------------------
@@ -83,27 +84,6 @@ class ColorMixer:
 
 
 # -------------------------------------------------
-# Domains
-# -------------------------------------------------
-def compute_domains_for_legend(hits, filter_spec):
-    emitters = set()
-    objects = set()
-    bounces = set()
-
-    for h in hits:
-        if not _allow(h["emitter_id"], filter_spec.get("emitters")):
-            continue
-        if not _allow(h["object"], filter_spec.get("objects")):
-            continue
-
-        emitters.add(h["emitter_id"])
-        objects.add(h["object"])
-        bounces.add(h["bounce"])
-
-    return sorted(emitters), sorted(objects), sorted(bounces)
-
-
-# -------------------------------------------------
 # Draw: Points
 # -------------------------------------------------
 def draw_points(
@@ -138,7 +118,7 @@ def draw_points(
 
 
 # -------------------------------------------------
-# Draw: Blobs
+# Draw: Blobs (surface clusters)
 # -------------------------------------------------
 def draw_blobs_2d(
     ax,
@@ -157,10 +137,10 @@ def draw_blobs_2d(
         if not _allow(h["object"], filter_spec.get("objects")):
             continue
 
-        key = (h["object"], h["emitter_id"], h["bounce"])
+        key = (h["object"], h["bounce"], h["prev_hit_label"])
         groups[key].append(h)
 
-    for (_, _, bounce), entries in groups.items():
+    for (_, bounce, _), entries in groups.items():
         if len(entries) < 3:
             continue
 
@@ -187,95 +167,99 @@ def draw_blobs_2d(
 
 
 # -------------------------------------------------
-# Draw: Centroids
+# Draw: Cluster centroids
 # -------------------------------------------------
-
-
-def draw_centroids(
-    ax,
-    stats,
-    filter_spec,
-    plane_key,
-    flip2d,
-):
-    """
-    Rita EN centroid per (emitter, objekt, bounce)
-    Samma klusterdefinition som blobs.
-    """
-
-    merged = defaultdict(list)
-
-    for (emitter_id, path_signature), s in stats.items():
-        if not _allow(emitter_id, filter_spec.get("emitters")):
+def draw_cluster_centroids(ax, clusters, filter_spec, plane_key, flip2d):
+    for c in clusters.values():
+        if not _allow(c["object"], filter_spec.get("objects")):
             continue
-        if not path_signature:
+        if not _allow(c["bounce"], filter_spec.get("bounces")):
             continue
 
-        last_obj, _last_face = path_signature[-1]
-        if not _allow(last_obj, filter_spec.get("objects")):
-            continue
-
-        bounce = s.get("mean_bounce")  # eller min/max om du vill
-        key = (emitter_id, last_obj, int(round(bounce)))
-
-        merged[key].append(s["centroid"])
-
-    # Rita EN centroid per interaction-kluster
-    for (_emitter, _obj, _bounce), pts in merged.items():
-        n = len(pts)
-        cx = sum(p[0] for p in pts) / n
-        cy = sum(p[1] for p in pts) / n
-        cz = sum(p[2] for p in pts) / n
-
-        cx, cy = _project((cx, cy, cz), plane_key)
+        cx, cy = c["centroid"][plane_key]
         if flip2d:
             cx, cy = cy, cx
+
+        cov = c["spread"][plane_key]["cov"]  # olika punkt storlek baserat på spridning i planet (covariansmatris)
+        if cov is not None:
+            import numpy as np
+
+            size = 200 / max(np.linalg.det(cov), 1e-6)
+        else:
+            size = 140
 
         ax.scatter(
             [cx],
             [cy],
-            s=120,
+            s=size,
             facecolor="none",
             edgecolor="black",
-            linewidths=1.5,
+            linewidths=1.8,
             zorder=20,
         )
 
 
-def draw_centroids_old(
-    ax,
-    stats,
-    filter_spec,
-    plane_key,
-    flip2d,
-):
-    for gid, s in stats.items():
-        obj, face, prev, bounce, emitter = gid
-
-        if not _allow(emitter, filter_spec.get("emitters")):
-            continue
-        if not _allow(obj, filter_spec.get("objects")):
-            continue
-
-        cx, cy, cz = s["centroid"]
-        cx, cy = _project((cx, cy, cz), plane_key)
-
-        if flip2d:
-            cx, cy = cy, cx
-
-        ax.scatter([cx], [cy], s=120, facecolor="none", edgecolor="black")
-
-
 # -------------------------------------------------
-# Legends (✅ MED HIT-COUNT PER BOUNCE)
+# Legends
 # -------------------------------------------------
+def label_marker_map(labels):
+    markers = ["o", "s", "^", "D", "x", "+", "*", "P"]
+    return {label: markers[i % len(markers)] for i, label in enumerate(sorted(labels))}
 
 
-def build_legends(ax, emitters, bounces, marker_map, mixer, hits):
-    # -------------------------------------------------
-    # Emitters legend
-    # -------------------------------------------------
-    h_emit = [
+def build_bounce_flow_legend(ax, clusters, mixer):
+    combo = {}
+
+    for c in clusters.values():
+        key = (c["bounce"], c["prev_hit_label"])
+        p = c.get("power", {}).get("out", 0.0)
+
+        if key not in combo:
+            combo[key] = {"hits": 0, "power": 0.0}
+
+        combo[key]["hits"] += c["hit_count"]
+        combo[key]["power"] += p
+
+    total_hits = sum(d["hits"] for d in combo.values())
+    total_power = sum(d["power"] for d in combo.values())
+
+    handles = []
+    labels = []
+
+    for (bounce, prev), data in sorted(combo.items()):
+        hits = data["hits"]
+        power = data["power"]
+
+        hits_pct = 100.0 * hits / total_hits if total_hits > 0 else 0.0
+        power_pct = 100.0 * power / total_power if total_power > 0 else 0.0
+
+        prev_str = prev if prev is not None else "∅"
+
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                linestyle="None",
+                markerfacecolor="none",
+                markeredgecolor=mixer.color(bounce)[0:3],
+                markersize=10,
+            )
+        )
+
+        # labels.append(f"B{bounce} | {prev_str} " f"({hits} hits, {hits_pct:.1f}%, " f"P={power:.2f}, {power_pct:.1f}%)")
+        labels.append(f"B{bounce} |  " f"({hits} hits, {hits_pct:.1f}%, " f"P={power:.2f}, {power_pct:.1f}%)")
+
+    ax.legend(
+        handles,
+        labels,
+        title="Bounce | Incoming surface",
+        loc="upper right",
+    )
+
+
+def build_emitter_legend(ax, emitters, marker_map):
+    handles = [
         Line2D(
             [0],
             [0],
@@ -286,49 +270,26 @@ def build_legends(ax, emitters, bounces, marker_map, mixer, hits):
         )
         for e in emitters
     ]
+    leg = ax.legend(handles=handles, title="Emitter", loc="upper left")
+    ax.add_artist(leg)
 
-    leg1 = ax.legend(handles=h_emit, title="Emitter", loc="upper left")
-    ax.add_artist(leg1)
 
-    # -------------------------------------------------
-    # Bounce statistics
-    # -------------------------------------------------
-    bounce_hit_count = Counter()
-    bounce_power_sum = defaultdict(float)
+# -------------------------------------------------
+# Domains
+# -------------------------------------------------
+def compute_domains_for_legend(hits, filter_spec):
+    emitters = set()
+    objects = set()
+    bounces = set()
 
     for h in hits:
-        b = h["bounce"]
-        bounce_hit_count[b] += 1
-        bounce_power_sum[b] += h.get("power", 0.0)
+        if not _allow(h["emitter_id"], filter_spec.get("emitters")):
+            continue
+        if not _allow(h["object"], filter_spec.get("objects")):
+            continue
 
-    total_hits = sum(bounce_hit_count.values())
+        emitters.add(h["emitter_id"])
+        objects.add(h["object"])
+        bounces.add(h["bounce"])
 
-    # -------------------------------------------------
-    # Bounce legend (hits | % | power)
-    # -------------------------------------------------
-    h_bounce = []
-    labels = []
-
-    for b in sorted(bounces):
-        hits_b = bounce_hit_count.get(b, 0)
-        pct = 100.0 * hits_b / total_hits if total_hits > 0 else 0.0
-        power = bounce_power_sum.get(b, 0.0)
-
-        h_bounce.append(
-            Line2D(
-                [0],
-                [0],
-                marker="o",
-                linestyle="None",
-                color=mixer.color(b),
-            )
-        )
-
-        labels.append(f"B{b} ({hits_b} | {pct:.0f}% | {power:.3f})")
-
-    ax.legend(
-        h_bounce,
-        labels,
-        title="Bounce (hits | % | power)",
-        loc="upper right",
-    )
+    return sorted(emitters), sorted(objects), sorted(bounces)

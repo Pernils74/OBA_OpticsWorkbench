@@ -8,13 +8,15 @@ import Part
 import time
 from logger import get_logger
 
-log = get_logger()
+# log = get_logger()
 
 import numpy as np
 
 
 from PySide import QtWidgets
 from .oba_ray_core import OBARay, OBARayManager
+
+from oba_objects.oba_lens_materials import get_refractive_index
 
 # from .oba_rays_phys import find_nearest_intersection, reflect
 
@@ -38,9 +40,15 @@ def run_normalized_ray_trace(source_obj, ray_gen, engine, max_bounce, max_length
     emitter_name = source_obj.Name
     wavelength = getattr(source_obj, "Wavelength", 550.0)
 
+    start_medium = getattr(source_obj, "StartMedium", "Air")
+    n0 = get_refractive_index(start_medium, wavelength_nm=wavelength)
+
     for p, direction, w in rays:
         power = w * scale
-        ray = OBARay(start_point=p, direction=direction, wavelength=wavelength, power=power, emitter_id=emitter_name, mode=mode)
+        ray = OBARay(start_point=p, direction=direction, wavelength=wavelength, power=power, emitter_id=emitter_name, mode=mode, medium_stack=[n0])
+
+        # ray.current_n = n0
+        # ray.medium_stack = [n0]
 
         if trace_mode == "OCC":
             propagate_occ(ray, engine, max_bounce, max_length)
@@ -355,7 +363,7 @@ def handle_optical_interaction(
     if props.get("FlipNormal", False):
         normal_eff = -normal_eff
 
-    if o_type == "Mirror":
+    if o_type in ("Mirror", "MirrorBuilder"):
         P_in = ray.power
         R = props.get("Reflectivity", 1.0)
         T = props.get("Transmissivity", 0.0)
@@ -412,30 +420,50 @@ def handle_optical_interaction(
     # ==================================================
     # LENSE
     # ==================================================
-    elif o_type == "Lens":
+
+    elif o_type in ("Lens", "LensBuilder"):
+
         P_in = ray.power
         surface_n = props.get("RefractiveIndex", 1.5)
         use_fresnel = props.get("UseFresnel", False)
 
-        incoming_dir = incoming_dir
-        normal_l = normal_eff
+        # 1. Bestäm om vi går IN eller UT baserat på strålens nuvarande medium
+        # Om strålen redan befinner sig i detta medium (eller linsen), är den på väg UT.
+        if abs(ray.current_n - surface_n) < 1e-5:
+            entering = False
+        else:
+            entering = True
 
-        entering = incoming_dir.dot(normal_l) < 0
-        if incoming_dir.dot(normal_l) > 0:
-            normal_l = -normal_l
+        # 2. Hantera normalen så att den ALLTID pekar MOT den inkommande strålen.
+        # Detta krävs för att standardfunktioner för brytning (refract) och reflektion (reflect) ska fungera.
+        dot = incoming_dir.dot(normal_eff)
+        if dot < 0:
+            normal_l = normal_eff
+        else:
+            normal_l = -normal_eff
 
+        # n1 är mediet strålen kommer FRÅN
         n1 = ray.current_n
-        n2 = surface_n if entering else (ray.medium_stack[-2] if len(ray.medium_stack) > 1 else 1.0)
 
+        # 3. Bestäm n2 (mediet strålen går TILL)
+        if entering:
+            n2 = surface_n
+        else:
+            # Vid utgång: Hämta föregående medium i stacken (oftast luft/vakuum = 1.0)
+            n2 = ray.medium_stack[-2] if len(ray.medium_stack) > 1 else 1.0
+
+        # Beräkna brytningsvinkeln (refract förväntar sig normalen vänd MOT strålen)
         refract_dir = refract(incoming_dir, normal_l, n1, n2)
 
         def fresnel_schlick(incident, normal, n1, n2):
-            cosi = max(-1.0, min(1.0, -incident.dot(normal)))
+            # abs() säkrar att cosinus alltid blir positiv (mellan 0 och 1) oavsett normalriktning
+            cosi = max(0.0, min(1.0, -incident.dot(normal)))
             r0 = ((n1 - n2) / (n1 + n2)) ** 2
             return r0 + (1 - r0) * (1 - cosi) ** 5
 
+        # 4. Beräkna reflektion (R) och transmission (T)
         if not refract_dir:
-            R = 1.0  # totalreflektion
+            R = 1.0  # Totalreflektion (händer oftast vid utgång i skarpa vinklar)
         elif use_fresnel:
             R = fresnel_schlick(incoming_dir, normal_l, n1, n2)
         else:
@@ -444,7 +472,6 @@ def handle_optical_interaction(
         T = 1.0 - R
 
         # --- Logga träffen på parent-rayen ---
-
         ray.log_bounce(
             props["Name"],
             o_type,
@@ -465,6 +492,8 @@ def handle_optical_interaction(
 
         # --- Fresnel-reflektion (NY bounce) ---
         if R > 1e-6:
+            # Reflektion studsar TILLBAKA till mediet vi kom ifrån.
+            # Eftersom normal_l pekar mot strålen, knuffar vi positions-offset LÄNGS normal_l.
             spawned_rays.append(
                 ray.spawn_child(
                     direction=reflect(incoming_dir, normal_l),
@@ -476,6 +505,8 @@ def handle_optical_interaction(
 
         # --- Refraktion (NY bounce) ---
         if refract_dir and T > 1e-6:
+            # Brytning fortsätter FRAMÅT in i nästa medium.
+            # Vi knuffar positions-offset MOTSATT normal_l för att trycka igenom strålen till andra sidan ytan.
             child = ray.spawn_child(
                 direction=refract_dir,
                 power=P_in * T,
@@ -483,7 +514,7 @@ def handle_optical_interaction(
                 extra={"type": "lens_refraction"},
             )
 
-            # ✅ Medium-stack hör till child
+            # ✅ Hantera medium-stacken för den brutna strålen
             if entering:
                 child.enter_medium(n2)
             else:
@@ -628,27 +659,6 @@ def handle_optical_interaction(
             },
         )
 
-    # else:
-    #     absorption = props.get("Absorption", 0.0)
-    #     P_in = ray.power
-    #     P_abs = P_in * absorption
-    #     ray.power = P_in - P_abs
-
-    #     ray.log_bounce(
-    #         props["Name"],
-    #         o_type,
-    #         last_hit_label,
-    #         prev_hit_label,
-    #         # target_label,
-    #         # prev_face,
-    #         hit_p,
-    #         normal_eff,
-    #         incoming_dir,
-    #         incoming_dir,
-    #         # ray.power,
-    #         extra={"absorbed_power": P_abs, "absorption": absorption, "power_in": P_in, "power_out": ray.power},
-    #     )
-
     return spawned_rays
 
 
@@ -656,6 +666,7 @@ def propagate_occ(ray, ray_targets, max_bounce, max_length):
     from Part import LineSegment
 
     for _ in range(max_bounce):
+
         if ray.bounce_count >= max_bounce:
             break
 
@@ -671,48 +682,122 @@ def propagate_occ(ray, ray_targets, max_bounce, max_length):
         best_dist = max_length
         hit_data = None
 
-        ray_line = LineSegment(origin, origin + direction * max_length).toShape()
+        ray_line = LineSegment(
+            origin,
+            origin + direction * max_length,
+        ).toShape()
 
-        # --- HIT DETECTION ---
+        # --------------------------------------------------
+        # HIT DETECTION
+        # --------------------------------------------------
+
         for target in ray_targets:
-            if not ray_intersects_bbox_fast(origin, inv_dir, target["bbox"]):
+
+            if not ray_intersects_bbox_fast(
+                origin,
+                inv_dir,
+                target["bbox"],
+            ):
                 continue
 
             dist, points, _ = target["face"].distToShape(ray_line)
 
             if dist < 1e-6:
+
                 p = points[0][0]
                 d = (p - origin).Length
 
                 if 1e-6 < d < best_dist:
-                    best_dist = d
-                    hit_data = target, p
 
-        # --- NO HIT ---
+                    best_dist = d
+                    hit_data = (target, p)
+
+        # --------------------------------------------------
+        # NO HIT
+        # --------------------------------------------------
+
         if not hit_data:
-            ray.add_segment(origin + direction * max_length, interaction_type="Void")
-            # ray.add_segment(origin + direction * max_length, "Void")
+            ray.add_segment(
+                origin + direction * max_length,
+                interaction_type="Void",
+            )
             break
 
         target, hit_p = hit_data
+
         props = target["props"]
         face = target["face"]
 
-        # --- NORMAL ---
+        # --------------------------------------------------
+        # NORMAL
+        # --------------------------------------------------
+
         u, v = face.Surface.parameter(hit_p)
+
         normal = face.normalAt(u, v).normalize()
+        raw_normal = normal
 
         if normal.dot(direction) > 0:
             normal = -normal
-
         incoming_dir = direction
 
-        prev_face = ray.last_hit_label  # ✅  Måste vara före add_segemnt
+        # ==================================================
+        # DETECTOR = OBSERVER
+        # ==================================================
 
-        ray.add_segment(hit_p, hit_face_label=target["label"])
+        if props.get("OpticalType") == "Detector":
+            mode = props.get("HitMode")  # , "Both")
+            if isinstance(mode, int):
+                mode = ["Both", "Front", "Back"][mode]
+            dot = incoming_dir.dot(raw_normal)
+            if mode == "Front" and dot > 0:
+                continue
+
+            if mode == "Back" and dot < 0:
+                continue
+
+            P_in = ray.power
+            detector_label = target["label"]
+            ray.log_bounce(
+                props["Name"],
+                "Detector",
+                detector_label,
+                ray.prev_hit_label,
+                hit_p,
+                normal,
+                incoming_dir,
+                incoming_dir,
+                extra={
+                    "power_in": P_in,
+                    "power_out": P_in,
+                    "detected_power": P_in,
+                    "wavelength": ray.wavelength,
+                },
+            )
+
+            # Silent detector: record the hit but do not treat the detector as an optical bounce.
+            ray.add_segment(hit_p, interaction_type="Detector")
+
+            child = ray.spawn_child(
+                direction=incoming_dir,
+                power=P_in,
+                offset=incoming_dir * 1e-4,
+            )
+            child.last_facet = None
+            child.last_target_id = None
+            ray = child
+            continue
+
+        # ==================================================
+        # VANLIG OPTIK
+        # ==================================================
+
+        ray.add_segment(
+            hit_p,
+            hit_face_label=target["label"],
+        )
+
         ray.bounce_count += 1
-
-        # --- OPTICS ---
 
         spawned = handle_optical_interaction(
             ray,
@@ -720,29 +805,41 @@ def propagate_occ(ray, ray_targets, max_bounce, max_length):
             normal,
             incoming_dir,
             props,
-            # target["label"],
-            # prev_face,
         )
 
         for child in spawned:
-            propagate_occ(child, ray_targets, max_bounce, max_length)
+            propagate_occ(
+                child,
+                ray_targets,
+                max_bounce,
+                max_length,
+            )
 
         if ray.power < 1e-12:
             break
 
 
 def propagate_mesh(ray, mesh_targets, max_bounce, max_length):
+
     from .oba_intersect_mesh import ray_mesh_intersect_numpy
 
     for _ in range(max_bounce):
+
         if ray.bounce_count >= max_bounce:
             break
 
         origin = ray.last_point
         direction = ray.direction
 
-        origin_np = np.array([origin.x, origin.y, origin.z], dtype=np.float32)
-        direction_np = np.array([direction.x, direction.y, direction.z], dtype=np.float32)
+        origin_np = np.array(
+            [origin.x, origin.y, origin.z],
+            dtype=np.float32,
+        )
+
+        direction_np = np.array(
+            [direction.x, direction.y, direction.z],
+            dtype=np.float32,
+        )
 
         inv_dir = (
             1.0 / direction.x if direction.x != 0 else 1e12,
@@ -752,23 +849,25 @@ def propagate_mesh(ray, mesh_targets, max_bounce, max_length):
 
         best_dist = max_length
         best_hit = None
-
         for target in mesh_targets:
-            if not ray_intersects_bbox_fast(origin, inv_dir, target["bbox"]):
+            if not ray_intersects_bbox_fast(
+                origin,
+                inv_dir,
+                target["bbox"],
+            ):
                 continue
-
-            ts, us, vs = ray_mesh_intersect_numpy(origin_np, direction_np, target["tri_array"])
-
+            ts, us, vs = ray_mesh_intersect_numpy(
+                origin_np,
+                direction_np,
+                target["tri_array"],
+            )
             if ray.last_facet is not None and id(target) == ray.last_target_id:
                 ts[ray.last_facet] = np.inf
-
             min_idx = np.argmin(ts)
             min_t = ts[min_idx]
-
             if 1e-6 < min_t < best_dist:
                 best_dist = float(min_t)
                 hit_point = origin + direction * best_dist
-
                 best_hit = (
                     target,
                     int(min_idx),
@@ -776,46 +875,117 @@ def propagate_mesh(ray, mesh_targets, max_bounce, max_length):
                     float(vs[min_idx]),
                     hit_point,
                 )
+        # --------------------------------------------------
+        # NO HIT
+        # --------------------------------------------------
 
-        # --- NO HIT ---
         if not best_hit:
-            ray.add_segment(origin + direction * max_length, interaction_type="Void")
-            # ray.add_segment(origin + direction * max_length, "Void")
+            ray.add_segment(
+                origin + direction * max_length,
+                interaction_type="Void",
+            )
             break
-
         target, tid, u, v, hit_p = best_hit
         props = target["props"]
-
         ray.last_facet = tid
         ray.last_target_id = id(target)
 
-        # --- NORMAL (vertex normals alltid) ---
+        # --------------------------------------------------
+        # NORMAL
+        # --------------------------------------------------
+
         n_tri = target["norm_array"][tid]
+
         n0, n1, n2 = n_tri
 
         w = 1.0 - u - v
+
         res_n = n0 * w + n1 * u + n2 * v
+
         normal = App.Vector(*res_n).normalize()
 
+        raw_normal = normal
         if normal.dot(direction) > 0:
             normal = -normal
-
         incoming_dir = direction
 
-        # prev_face = str(ray.last_hit_face) if ray.last_hit_face is not None else None  # ✅ stabil sträng, Måste vara före add_segemnt
+        # ==================================================
+        # DETECTOR = OBSERVER
+        # ==================================================
 
-        # prev_face = ray.last_hit_label
+        # if props.get("OpticalType") == "Detector":
+        #     print("[DETECTOR HIT] wl =", ray.wavelength)
+        #     print("[target]", target, target["label"])
 
-        # ray.add_segment(hit_p, target["label"], origin_face=target["face"], origin_label=target["label"])
-        # ray.add_segment(hit_p, target["label"], hit_face=target["face"])  # , origin_label=target["label"])
-        ray.add_segment(hit_p, hit_face_label=target["label"])  # skickar med label för att sätta last_hit_face_label
+        if props.get("OpticalType") == "Detector":
+            mode = props.get("HitMode")  # , "Both")
+
+            if isinstance(mode, int):
+                mode = ["Both", "Front", "Back"][mode]
+            dot = incoming_dir.dot(raw_normal)
+            if mode == "Front" and dot > 0:
+                continue
+            if mode == "Back" and dot < 0:
+                continue
+
+            P_in = ray.power
+            detector_label = target["label"]
+
+            ray.log_bounce(
+                props["Name"],
+                "Detector",
+                detector_label,
+                ray.prev_hit_label,
+                hit_p,
+                normal,
+                incoming_dir,
+                incoming_dir,
+                extra={
+                    "power_in": P_in,
+                    "power_out": P_in,
+                    "detected_power": P_in,
+                    "wavelength": ray.wavelength,
+                },
+            )
+
+            # Silent detector: record the hit but keep the ray optical state unchanged.
+            ray.add_segment(hit_p, interaction_type="Detector")
+
+            child = ray.spawn_child(
+                direction=incoming_dir,
+                power=P_in,
+                offset=incoming_dir * 1e-4,
+            )
+            child.last_facet = None
+            child.last_target_id = None
+            ray = child
+
+            continue
+
+        # ==================================================
+        # VANLIG OPTIK
+        # ==================================================
+
+        ray.add_segment(
+            hit_p,
+            hit_face_label=target["label"],
+        )
+
         ray.bounce_count += 1
-
-        # --- OPTICS ---
-        spawned = handle_optical_interaction(ray, hit_p, normal, incoming_dir, props)  # , prev_face)
-
+        spawned = handle_optical_interaction(
+            ray,
+            hit_p,
+            normal,
+            incoming_dir,
+            props,
+        )
         for child in spawned:
-            propagate_mesh(child, mesh_targets, max_bounce, max_length)
+            propagate_mesh(
+                child,
+                mesh_targets,
+                max_bounce,
+                max_length,
+            )
 
         if ray.power < 1e-12:
             break

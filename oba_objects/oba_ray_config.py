@@ -66,6 +66,13 @@ class OBARayConfig(OBAElementProxy):
             default=False,
         )
 
+        self._ensure_bool(
+            obj,
+            "ShowLog",
+            "TraceSettings",
+            default=False,
+        )
+
         # -------- Mesh --------
         self._ensure_float(
             obj,
@@ -201,6 +208,8 @@ class RayConfigDialog(OBABaseDialog):
     def _build_trace_settings(self, layout):
         self._add_enum("Trace mode", "TraceMode", layout)
         self._add_enum("Run mode", "RunMode", layout)
+
+        self._add_bool("Show log output", "ShowLog", layout)
 
         self._add_bool("Disable debounce", "DisableDebounce", layout)
 

@@ -5,6 +5,7 @@ import os
 import sqlite3
 import threading
 import FreeCAD as App
+import math
 
 
 # --------------------------------------------------
@@ -33,6 +34,9 @@ class HitsDB:
     def __init__(self, path=None):
         self.path = path or get_default_db_path()
         self._lock = threading.Lock()
+
+        self._pending_writes = 0
+        self._commit_interval = 20
 
         # Persistent connection
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
@@ -114,7 +118,59 @@ class HitsDB:
     # --------------------------------------------------
     # FAST WRITE (batch)
     # --------------------------------------------------
+
     def write_hits_batch(self, rows):
+        if not rows:
+            return
+
+        def trunc(v):
+            decimals = 6
+            factor = 10**decimals
+            return math.trunc(v * factor) / factor
+
+        fixed_rows = []
+        for r in rows:
+            # unpack
+            doc, target, emitter, optical, moved, x, y, z, hits, pin, pout, absorbed = r
+            # ✅ kvantisera här
+            x = trunc(x)
+            y = trunc(y)
+            z = trunc(z)
+
+            fixed_rows.append((doc, target, emitter, optical, moved, x, y, z, hits, pin, pout, absorbed))
+        with self._lock:
+            self.conn.executemany(
+                """
+                INSERT INTO hits (
+                    doc_name,
+                    target_object,
+                    emitter_id,
+                    optical_type,
+                    moved_objects,
+                    x, y, z,
+                    hits,
+                    power_in,
+                    power_out,
+                    absorbed_power
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(
+                    doc_name,
+                    target_object,
+                    emitter_id,
+                    x, y, z
+                )
+                DO UPDATE SET
+                    hits = excluded.hits,
+                    power_in = excluded.power_in,
+                    power_out = excluded.power_out,
+                    absorbed_power = excluded.absorbed_power,
+                    moved_objects = excluded.moved_objects
+                """,
+                fixed_rows,
+            )
+
+    def write_hits_batch_old(self, rows):
         """
         rows = [
             (doc, target, emitter, optical, x, y, z,
@@ -160,6 +216,14 @@ class HitsDB:
     def commit(self):
         with self._lock:
             self.conn.commit()
+            self._pending_writes = 0
+
+    def flush_if_needed(self):
+        self._pending_writes += 1
+
+        if self._pending_writes >= self._commit_interval:
+            self.commit()
+            self._pending_writes = 0
 
     # --------------------------------------------------
     # Read

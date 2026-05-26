@@ -2,6 +2,7 @@
 # heatmap_viewer.py
 
 import os
+
 import numpy as np
 import FreeCAD as App
 import FreeCADGui as Gui
@@ -15,7 +16,7 @@ from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import proj3d, Axes3D
 
 
-from .batch_runner import resolve_move_target, snapshot_placement, clear_placement_expressions, apply_direct_offset, restore_placement
+from .batch_runner import resolve_move_target, snapshot_placement, clear_placement_expressions, apply_direct_offset, restore_placement, run_trace, store_hits
 from .scan_db import HitsDB
 
 DOCK_OBJECT_NAME = "BeamAbsorberHeatmapDock"
@@ -267,6 +268,8 @@ class BeamAbsorberHeatmapDock(QtWidgets.QDockWidget):
 
                 if Moved_objects:
                     self._current_moved_objects = Moved_objects[0]
+
+                self._current_doc_name = doc
             else:
                 V += val
 
@@ -290,55 +293,6 @@ class BeamAbsorberHeatmapDock(QtWidgets.QDockWidget):
         if self.chkPercent.isChecked():
             Vi, _ = self._to_percent(Vi)
         # Plot
-        self._plot_surface(Xi, Yi, Vi, plane)
-        self._plot_profiles(Xi, Yi, Vi)
-
-    def _update_plot_old(self):
-        doc = self.comboDoc.currentText()
-        target = self.comboTarget.currentText()
-
-        if "<" in doc or not target:
-            self._clear_plots()
-            return
-
-        emitters = self._get_selected_emitters()
-        if not emitters:
-            self._clear_plots()
-            return
-
-        X = Y = Z = V = None
-        use_power = self.comboValue.currentText() == "Power"
-
-        for em in emitters:
-            Xi, Yi, Zi, Hi, Pi = self.db.read_grid(doc, target, em)
-
-            if not Xi:
-                continue
-
-            val = np.asarray(Pi if use_power else Hi)
-
-            if V is None:
-                X, Y, Z, V = map(np.asarray, (Xi, Yi, Zi, val))
-            else:
-                V += val
-
-        if V is None:
-            self._clear_plots()
-            return
-
-        plane = self.comboPlane.currentText()
-        if plane == "XY":
-            px, py = X, Y
-        elif plane == "XZ":
-            px, py = X, Z
-        else:
-            px, py = Y, Z
-
-        Xi, Yi, Vi = self._build_grid(px, py, V)
-
-        if self.chkPercent.isChecked():
-            Vi, _ = self._to_percent(Vi)
-
         self._plot_surface(Xi, Yi, Vi, plane)
         self._plot_profiles(Xi, Yi, Vi)
 
@@ -413,6 +367,7 @@ class BeamAbsorberHeatmapDock(QtWidgets.QDockWidget):
         self.canvas3d.draw_idle()
 
     def _on_surface_pick(self, event):
+
         if not self.chkPickable.isChecked():
             return
         if self._scatter is None or event.artist != self._scatter:
@@ -425,15 +380,6 @@ class BeamAbsorberHeatmapDock(QtWidgets.QDockWidget):
         x_val = X[i]
         y_val = Y[i]
         z_val = Z[i]
-
-        # Hämtar moved objects
-        # names = self._current_moved_objects.split(";") if hasattr(self, "_current_moved_objects") else []
-        # doc = App.ActiveDocument
-        # objs = []
-        # for n in names:
-        #     o = doc.getObject(n)
-        #     if o:
-        #         objs.append(o)
 
         App.Console.PrintMessage("\n--- Klick ---\n")
         App.Console.PrintMessage(f"X: {x_val:.4f}\n")
@@ -465,6 +411,31 @@ class BeamAbsorberHeatmapDock(QtWidgets.QDockWidget):
         else:  # YZ
             dx, dy, dz = 0.0, x_val, y_val
         self._move_objects_to_offset(dx, dy, dz)
+
+        # ----------------------------------
+        # Kör trace + skriv till DB
+        # ----------------------------------
+
+        doc = App.ActiveDocument
+
+        move_objects = {}
+        placement_snaps = {}
+
+        for obj in self._snapshotted_objects:
+            move_objects[obj.Name] = obj
+            placement_snaps[obj.Name] = self._placement_snapshot[obj.Name]
+
+        moved_str = self._current_moved_objects or ""
+
+        doc_name = self._current_doc_name
+        moved_str = self._current_moved_objects
+
+        hits = run_trace()
+        store_hits(self.db, doc_name, hits, dx, dy, dz, moved_str)
+        self.db.commit()  # spar direkt så det syns i grafen
+
+        # trace_and_store(doc, self.db, move_objects, placement_snaps, dx, dy, dz, moved_str)
+
         self._update_profile_markers(x_val, y_val, z_val)
 
     def _plot_profiles(self, Xi, Yi, Vi):
@@ -521,23 +492,6 @@ class BeamAbsorberHeatmapDock(QtWidgets.QDockWidget):
 
         self._profile_markers = [m1, m2]
 
-        self.canvasProf.draw_idle()
-
-    def _update_profile_markers_old(self, x_val, y_val):
-        if not hasattr(self, "_profile_X"):
-            return
-        ax = self.figProf.axes[0]
-        if hasattr(self, "_profile_markers"):
-            for m in self._profile_markers:
-                try:
-                    m.remove()
-                except:
-                    pass
-        idx_x = np.argmin(np.abs(self._profile_X - x_val))
-        idx_y = np.argmin(np.abs(self._profile_Y - y_val))
-        m1 = ax.scatter(self._profile_X[idx_x], self._profile_X_values[idx_x], color="red", s=60, zorder=10)
-        m2 = ax.scatter(self._profile_Y[idx_y], self._profile_Y_values[idx_y], color="blue", s=60, zorder=10)
-        self._profile_markers = [m1, m2]
         self.canvasProf.draw_idle()
 
     # ==========================================================
@@ -617,6 +571,7 @@ class BeamAbsorberHeatmapDock(QtWidgets.QDockWidget):
         App.ActiveDocument.recompute()
 
     def closeEvent(self, event):
+        self.db.commit()
         self._restore_objects()
         super().closeEvent(event)
 

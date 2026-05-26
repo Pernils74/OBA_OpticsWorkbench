@@ -1,11 +1,21 @@
-### OBA Opticsworkbench
+# OBA Opticsworkbench
 
-Before anything else, I want to give a shout‑out to **chbergmann** for the original **OpticsWorkbench**. That project has been the primary inspiration for this extension and laid the foundation for many of the ideas developed further here.
+---
+
+OBA Optics Workbench is a FreeCAD-based environment focused on optical analysis and ray-based simulation within the OBA ecosystem.
+
+The workbench provides a reactive workflow where changes to geometry or parameters are immediately reflected in the ray tracing results. This makes it well suited for exploring and understanding the behavior of optical systems such as lenses, mirrors, and detectors.
+
+It includes tools for scanning, evaluating, and visualizing optical interactions, enabling efficient analysis and rapid iteration of designs
+
+While this workbench focuses on 3D optical systems, the original **OpticsWorkbench** by **chbergmann** remains a strong choice for 2D and planar use cases.
 
 The original Optical Workbench can be found here:
 https://github.com/chbergmann/OpticsWorkbench
 
-#### Changelog
+## Changelog
+
+---
 
 ### Version 0.1
 
@@ -30,9 +40,32 @@ https://github.com/chbergmann/OpticsWorkbench
   (e.g. `Spreadsheet`, `ExpressionEngine`) are handled correctly.
 - Extended Heatmap Viewer with interactive surface picking, profile linking, and direct object offset replay.
 
-## 🔧 Installation
+### Version 0.4
 
-![screenshot](./examples/screenshot_github_download.png)
+- Heatmap: clicking the surface now updates the database selection
+- RayConfig:
+  - Added `RunMode` (Manual / Auto)
+  - Tracing can now be triggered via interaction (e.g. click)
+- RayConfig:
+  - Added checkbox to enable trace logging in the FreeCAD console  
+    (requires **Display message types → Log messages** to be enabled)
+- Density & Cluster plots:
+  - Filter panel now displays _labels_ instead of object names
+- Density Plot:
+  - Added axis flip option
+- New optical object:
+  - `Detector` (passive hit observer) ![Detector](./icons/oba_detector.svg)
+- Builders:
+  - Added builder tools for creating optical geometry
+    ![Lensbuilder](./icons/oba_lensbuilder.svg) ![Mirrorbuilder](./icons/oba_mirrorbuilder.svg) ![Planebuilder](./icons/oba_planebuilder.svg)
+
+# 🔧 Installation
+
+---
+
+<img src="./examples/screenshot_github_download.png" width="820" align="left" alt="Installtion">
+
+<hr style="clear: both;">
 
     To install, unzip and copy the content into FreeCAD’s Mod folder.
     Typical location on Windows:
@@ -42,571 +75,91 @@ https://github.com/chbergmann/OpticsWorkbench
 
     ```
 
-## 🧩 Surface‑based optics (ShapeBinders)
-
-    The workbench leverages FreeCAD **ShapeBinders** to reference geometry faces.
-
-    When creating an optical element, selected faces are converted into
-    ShapeBinders and used as the active optical surfaces. The ray tracer operates
-    entirely on these references, keeping the optical model decoupled from the
-    source geometry.
-
-    Optical surfaces may be added either during creation by selecting faces, or
-    later through the settings dialog. The dialog displays all referenced surfaces;
-    clicking a surface entry removes that surface from the optical element.
-
-<!-- ................ Emitter ................... -->
-
-<img src="./examples/dialog_emitter.png" width="320" align="right" alt="Mirror dialog">
-
-## ![Emitter](./icons/oba_emitter.svg) Emitter
-
-- `Lambertian` Applies cosine-based angular weighting to ray power distribution.
-
-- `Flip normal` Inverts the surface normal used for emission. Useful if geometry normals point in the wrong direction
-
-- `Spread angle` Angular spread of emitted rays. Spread is applied around the surface normal
-
-- `Power` Total emitted optical power.
-
-- `Max rays` Maximum number of rays generated. The final ray count may be reduced by `isInside` filtering.
-
-- `Wavelength` Central wavelength of the emitted rays.
-
-- `Max bounce` Maximum number of surface interactions per ray.
-
-- `Max ray length` Maximum propagation distance of each ray. Rays are terminated after exceeding this length
-
-- `Preview ray length` Length of the ray segments shown in preview mode.
-
-- `Linked surfaces` Lists all geometry faces linked to the mirror via **ShapeBinder**.
-
-<hr style="clear: both;">
-
-<!-- ................ Beam ................... -->
-
-## ![Beam](./icons/oba_beam.svg) Beam
-
-<img src="./examples/dialog_beam.png" width="400" align="right" alt="Mirror dialog">
-
-- `Direction` Use the spinbox or the translation funciton in 3d view
-
-- `Lambertian` Applies cosine-based angular weighting to ray power distribution.
-
-- `Spread angle` Angular spread of emitted rays. Spread is applied around the surface normal
-
-- `Max rays` Maximum number of rays generated. The final ray count may be reduced by `isInside` filtering.
-
-- `Max bounce` Maximum number of surface interactions per ray.
-
-- `Max ray length` Maximum propagation distance of each ray. Rays are terminated after exceeding this length
-
-- `Power` Total emitted optical power.
-
-- `Wavelength` Central wavelength of the emitted rays.
-
-- `Preview length` Length of the ray segments shown in preview mode.
-
-- `Ray line width` Visual thickness of the rendered ray lines.
-
-- `Linked surfaces` Lists all geometry faces linked to the mirror via **ShapeBinder**.
-
-<hr style="clear: both;">
-
-<!-- ................ Mirror ................... -->
-
-<img src="./examples/dialog_mirror.png" width="320" align="right" alt="Mirror dialog">
-
-## ![Mirror](./icons/oba_mirror.svg) Mirror
-
-- `Reflectivity` **Range:** 0.0 – 1.0. `1.0` means a perfect mirror (all light is reflected)
-
-- `Transmissivity` - **Range:** 0.0 – 1.0. Used to model semi‑transparent or beam‑splitting surfaces
-
-- `Linked surfaces` Lists all geometry faces linked to the mirror via **ShapeBinder**.
-
-<hr style="clear: both;">
-
-<!-- ................ Lens ................... -->
-
-<img src="./examples/dialog_lens.png" width="320" align="right" alt="Lens dialog">
-
-## ![Lens](./icons/oba_lens.svg) Lens
-
-- `Material` Material preset for the lens. Materials are pushed on entry and popped on exit, relative to the surface normal.
-
-- `Flip surface normal` Inverts the surface normal used for optical calculations.
-
-- `Show surface normal` Displays a visual preview of the surface normal. Debug tool for checking normal orientation
-
-- `Refractive index` Refractive index (n) of the lens material. Must be greater than 1.0. Default: 1.50
-
-- `Enable Fresnel` Enables Fresnel‑based reflection and transmission.
-
-- `Abbe Number` Controls chromatic dispersion of the lens material.
-
-- `Linked surfaces` Lists all geometry faces linked to the mirror via **ShapeBinder**.
-
-<hr style="clear: both;">
-
-<!-- ................ Absorber ................... -->
-
-<img src="./examples/dialog_absorber.png" width="320" align="right" alt="Absorber dialog">
-
-## ![Absorber](./icons/oba_absorber.svg) Absorber
-
-- `Absorption` Fraction of ray power absorbed by the surface (0.0–1.0).
-
-- `Linked surfaces` Lists all geometry faces linked to the mirror via **ShapeBinder**.
-
-<hr style="clear: both;">
-
-<!-- ................ Grating ................... -->
-
-<img src="./examples/dialog_grating.png" width="320" align="right" alt="Lens dialog">
-
-## ![Grating](./icons/oba_grating.svg) Grating
-
-- `Lines per mm` Number of grooves per millimeter of the grating.
-
-- `Orders` Diffraction orders to simulate. Specified as a list of integers (e.g. 0, 1, -1)
-
-- `Spectrum rays` Number of rays generated for spectral splitting per diffraction order.
-
-- `Efficiency (power)`Simplified diffraction efficiency per order. Range: 0.0 – 1.0
-
-- `Show surface normal` Displays a visual preview of the surface normal. Debug tool for checking normal orientation
-
-- `Flip normal` Inverts the surface normal used for optical computation.
-
-- `Linked surfaces` Lists all geometry faces linked to the mirror via **ShapeBinder**.
-
-<hr style="clear: both;">
-
-<!-- ................ RayConfig ................... -->
-
-<img src="./examples/dialog_rayconfig.png" width="320" align="right" alt="Lens dialog">
-
-## ![RayConfig](./icons/oba_rayconfig.svg) RayConfig
-
-> ⚠️ **Required for tracing**
-> A RayConfig object must exist in the document tree for ray tracing and visualization to work.  
-> If no RayConfig is present, no rays will be traced or displayed.
-
-- `Trace mode` Mesh — triangle‑based ray tracing **_(default)_** ,OCC — OpenCASCADE analytic geometry tracing
-
-- `Run mode`
-  - **AUTO** — Ray tracing is triggered automatically by changes in the document (geometry edits, property changes, etc.).  
-    Recommended for interactive work.
-
-  - **MANUAL** — Automatic tracing is disabled.  
-    Tracing must be triggered explicitly (used by batch processing, scanners, and scripted workflows).
-
-    💡 Rays can still be updated manually by creating or reopening the RayConfig object.
-
-- `Disable debounce` Disables automatic trace debouncing
-
-- `Mesh tolerance` Controls mesh resolution used for ray tracing.
-
-- `Mesh ray multiplier` Multiplier applied to ray count when using **_mesh_** tracing.
-
-- `Scene isolation` Isolates the active optical scene.
-
-- `Color By Bounce` Colors rays according to bounce count.
-
-- `Bounce min / Bounce max` Limits which ray segments are visible.
-
-- `Show mesh` Displays mesh triangles used for ray tracing **_(debug)_**.
-
-- `Show vertex normals` Displays vertex normals for mesh geometry **_(debug)_**.
-
-- `Vertex normal length` Length of displayed vertex normals **_(debug)_**.
-
-- `Create ray paths object` Creates a FreeCAD object containing the traced ray geometry.
-
-- `Remove ray paths object` Removes the generated ray geometry object from the document.
-
-<hr style="clear: both;">
-
-<!-- ................ BounceRangeDialog ................... -->
-
-<img src="./examples/dialog_bounce_range.png" width="450" align="right" alt="Lens dialog">
-
-## ![BounceRangeDialog](./icons/oba_bounce_range.svg) BounceRangeDialog
-
-The Bounce Range dialog provides interactive control over which ray bounces are visualized in the scene.
-It operates purely on ray visualization and does not affect ray tracing results.
-
-### Bounce Range Slider
-
-    Selects the range of ray bounce indices to display.
-
-        - The left handle sets minimum bounce index
-        - The right handle sets maximum bounce index
-
-    Only ray segments within this range are rendered
-
-### Magnet (Lock Range)
-
-    When enabled, the selected bounce range is locked.
-
-    Moving one handle moves the entire range
-
-    The range width is preserved
-
-    Prevents accidental resizing when scanning through bounces
-
-    Useful for inspecting successive bounce layers.
-
-### Color by Bounce
-
-    Colors rays according to their bounce count.
-
-    Each bounce index receives a distinct color
-
-    Helps visualize reflection depth and ray complexity
-
-    Matches the global ColorByBounce setting in RayConfig
-
-    Visualization only — no optical effect.
-
-### Scene Isolation
-
-    Isolates the optical scene during visualization.
-
-    Non‑optical objects are hidden
-
-    Improves clarity in complex documents
-
-    Matches the global SceneIsolation setting in RayConfig
-
-<hr style="clear: both;">
-
-<!-- ................ Density Plot ................... -->
-
-<img src="./examples/density_plot.png" width="550" align="right" alt="Lens dialog">
-
-## ![DensityPlot](./icons/plot_power_density.svg) DensityPlot
-
-    The Power Density Plot visualizes how ray power is distributed over space based on ray hit data.
-    It operates on already traced rays and performs no ray tracing itself.
-
-### Plane
-
-    Selects the projection plane for 2D plots.
-
-    XY
-    XZ
-    YZ
-
-    Hit points are orthogonally projected onto the selected plane.
-
-### Power
-
-    Selects which power quantity to visualize.
-
-    Power In — incoming ray power at the hit
-    Power Out — remaining ray power after interaction
-
-### Bins
-
-    Number of bins used for the 2D histogram.
-
-    Higher values increase spatial resolution
-    Lower values produce smoother, coarser plots
-    Typical range: 50 – 200
-
-### σ (Gaussian smoothing)
-
-    Applies Gaussian filtering to the power density map.
-
-    0.0 disables smoothing
-    Higher values smooth noise and sampling artifacts
-    Uses a 2D Gaussian kernel
-
-### Log
-
-    Applies logarithmic scaling to the power density.
-
-    Useful for large dynamic ranges
-    Helps reveal low‑intensity regions
-    A small offset is added internally to avoid log(0)
-
-### Equal
-
-    Forces equal axis scaling.
-
-    Preserves geometric proportions
-    Recommended for accurate spatial interpretation
-
-### Grid
-
-    Displays a grid overlay on the plot.
-
-    Visualization aid only
-
-### Show Filter
-
-    Shows or hides the Hit Filter Panel.
-    The filter panel allows limiting data by:
-
-    - Emitters
-    - Optical objects
-
-### 3D
-
-    Enables 3D visualization of ray hit points.
-
-    Displays hit points in full XYZ space
-    Points are grouped and color‑coded by object
-    A legend is generated automatically
-
-### XYZ List
-
-    Opens a live list of hit coordinates.
-
-    Displays raw (x, y, z) values
-    Useful for inspection, debugging, or export
-
-<hr style="clear: both;">
+# Optical objects
 
 ---
 
-<!-- ................ Cluster Plot ................... -->
+Interactive optical components used for building and tracing optical systems.  
+These objects define how rays are emitted, transformed, and detected.
 
-<img src="./examples/cluster_plot.png" width="550" align="right" alt="Lens dialog">
+### [![Beam](/icons/oba_beam.svg) Beam](docs/optical_objects.md#beam)
 
-## ![RayClusterPlot](./icons/plot_ray_cluster.svg) RayClusterPlot
+Directional point source for controlled ray emission.
 
-    The Cluster Plot tool provides advanced visualization of ray hit distributions, including clustering, centroids, and optional 3D views.
-    It is designed for analysis and debugging of ray behavior rather than physical simulation.
+### [![Emitter](/icons/oba_emitter.svg) Emitter](docs/optical_objects.md#emitter)
 
-### Plane
+Surface-based emitter distributing rays across geometry.
 
-    Selects the projection plane for 2D visualization:
+### [![Mirror](/icons/oba_mirror.svg) Mirror](docs/optical_objects.md#mirror)
 
-    XY
-    XZ
-    YZ
+Reflective optical surface with configurable reflection properties
 
-    Hit coordinates are projected orthogonally.
+### [![Absorber](/icons/oba_absorber.svg) Absorber](docs/optical_objects.md#absorber)
 
-### Flip
+Absorbs a portion or all of incoming ray power.
 
-    Flips the 2D projection axes.
+### [![Detector](/icons/oba_detector.svg) Detector](docs/optical_objects.md#detector)
 
-    Useful for matching different coordinate conventions
-    Visualization only
+Captures ray interactions for analysis and visualization.
 
-### Grid
+### [![Lens](/icons/oba_lens.svg) Lens](docs/optical_objects.md#lens)
 
-    Toggles a grid overlay on the plot.
+Refractive optical element for bending and focusing rays.
 
-### Equal
+### [![Grating](/icons/oba_grating.svg) Grating](docs/optical_objects.md#grating)
 
-    Forces equal axis scaling.    Preserves geometric proportions
+Diffractive surface that splits rays based on wavelength.
 
-### Blobs
+### [![Ray config](/icons/oba_rayconfig.svg) Ray config](docs/optical_objects.md#rayconfig)
 
-    Enables 2D clustering visualization.    Displays density‑based blob regions
+Global configuration controlling ray tracing and visualization.
 
-### Smooth
+# Plots
 
-    Applies smoothing to blob visualization.   Reduces sampling noise
+---
 
-### Centroids
+Visualization and analysis tools for inspecting ray behavior after tracing.  
+These tools do not affect the simulation itself but help interpret results.
 
-    Displays cluster centroids. Each centroid represents the average hit position
+### [![Bounce Range](/icons/oba_bounce_range.svg) Bounce Range](docs/plots.md#bouncerangedialog)
 
-### Show Filter
+Filter and inspect ray segments based on bounce index.
 
-    Shows or hides the Hit Filter Panel.
-    Filters allow limiting hits by:
+### [![Density Plot](/icons/plot_power_density.svg) Density Plot](docs/plots.md#densityplot)
 
-    - Emitters
-    - Optical objects
+Visualizes spatial distribution of ray power.
 
-### 3D
+### [![Cluster Plot](/icons/plot_ray_cluster.svg) Cluster Plot](docs/plots.md#rayclusterplot)
 
-    Enables 3D visualization of ray hit points.
+Groups ray hits into clusters and highlights structure.
 
-    Displays hits in full XYZ space. Points are grouped and color‑coded by object
+### [![Power vs Hit](/icons/plot_power_vs_hit.svg) Power vs Hit](docs/plots.md#power-vs-hit-plot)
 
-### XYZ List
+Shows how ray power evolves across interactions.
 
-    Opens a live list of hit coordinates.
+# Scanner
 
-    Displays raw (x, y, z) values
-    Useful for inspection, debugging, or export
+---
 
-<hr style="clear: both;">
+### [![Scanner](/icons/scanner_batch_dialog.svg) Scanner](docs/scanner.md#scanner)
 
-<!-- ................ Power vs hit Plot ................... -->
+### [![HeatmapPlot](/icons/heatmap.svg) HeatmapPlot](docs/scanner.md#heatmapplot)
 
-<img src="./examples/power_vs_hit_plot.png" width="550" align="right" alt="Lens dialog">
+# Examples
 
-## ![Power vs Hit Plot](./icons/plot_power_vs_hit.svg) Power vs Hit Plot
+---
 
-    The plot clearly illustrates the cumulative power loss in the optical system, where each hit contributes to a reduction in remaining energy.
-    Features
-
-### Normalize to %
-
-    Displays power as a percentage of the initial value.
-
-### Show Ray Count
-
-    Shows the number of rays contributing to each hit (when enabled).
-
-### Log Y
-
-    Enables a logarithmic Y-axis for improved visualization of large dynamic ranges.
-
-## Filter Panel
-
-    Allows selection of which emitters and objects are included in the plot
-    (e.g. Emitter, Mirror, Mirror001, Absorber).
-
-<hr style="clear: both;">
-
-<!-- ................ Scanner Batch Dialog ................... -->
-
-## ![Scanner](./icons/scanner_batch_dialog.svg) Scanner
-
-![screenshot](./examples/scanner_batch_dialog.png)
-
-    The Batch Group tool allows running multiple simulation steps sequentially, typically for parameter scans, rotations, or systematic sweeps.
-    A Batch Group is stored as an object in the document tree and managed through a dockable panel.
-
-- `Add Step` Creates a new Step object and opens the Step Edit dialog.
-
-- `Run` Executes all active steps in sequence.
-
-- `Stop` Stops the batch execution gracefully.
-
-- `Heatmap` Opens the Heatmap Viewer for inspecting accumulated batch results.
-
-- `DB XYZ List` Opens a list view of stored XYZ scan data.
-
-<hr style="clear: both;">
-
-<!-- ................ Scanner Step Dialog ................... -->
-
-![screenshot](./examples/scanner_step_dialog.png)
-
-    The Step Edit dialog is used to define and edit a single Batch Step within a Batch Group.
-    Each step describes one scan or transformation operation applied during batch execution.
-
-- `Move Targets`
-  Defines which objects are affected by the step.
-  Move Target / Move Target 1 / Move Target 2
-  Select up to three objects to be moved or scanned.
-  At least one target must be selected
-
-- `Plane` Selects the primary scan plane:
-  XY
-  XZ
-  YZ
-
-  The selected plane also determines the default rotation axis.
-
-#### Sweep Parameters
-
-- `Range` 1 – 360. Controls angular resolution
-
-- `From Radius` Start radius of the scan.
-
-- `To Radius` End radius of the scan.
-
-- `Radius Steps` Number of radial steps between start and end radius.
-
-- `Rotation Axis` Axis around which extra rotation is applied. Automatically synchronized with the selected plane.
-
-- `Rotation (°)` Fixed rotation angle applied to the target.
-
-> Data is stored in a SQLite database file located in the same directory as the installed module folder.  
-> This file is created automatically and persists between sessions.
-
-<!-- ................ Scanner Heatmap plot ................... -->
-
-## ![HeatmapPlot](./icons/heatmap.svg) HeatmapPlot
-
-![screenshot](./examples/scanner_heatmap_plot.png)
-
-    The Heatmap Viewer provides post‑processing visualization of batch scan results stored in the local database.
-    It is primarily used to analyze absorber hits and accumulated beam power over scanned parameter spaces.
-
-- `Reload` Reloads document structure from the database
-
-- `Delete`Permanently removes the selected document from the database
-
-- `Target Object` Selects the scanned target object.
-
-- `Value` Selects which quantity is visualized. Hits — number of ray hits. Power In — incoming power at the hit. Power Out — remaining power after interaction.
-
-- `Emitters` Lists all emitters associated with the selected document and target.
-
-### Plot Options
-
-- `Plane` Selects projection plane:
-
-- `Clickable surfaces` Enables interactive selection on the heatma
-
-- `Smooth` Enables spatial smoothing of the data.
-
-- `Strength` Controls smoothing strength.
-
-- `Show %` Normalizes values to percentage of the maximum.
-
-### Visualization
-
-    Heatmap Surface (3D)
-
-    Displays a 3D surface plot of the selected value
-    Height represents accumulated value
-    Color map: viridis
-    Updated dynamically on data or option changes
-
-##### Clickable surface
-
-    When **Clickable surface** is enabled:
-
-    Clicking the surface selects a scan position (offset)
-    A red marker shows the selected point in the 3D plot
-    The corresponding offset is applied to the moved objects in the FreeCAD scene
-
-#### Profiles
-
-    Displays cross‑sectional profiles through the heatmap:
-
-    X profile — center row
-    Y profile — center column
-
-    Useful for:
-
-    Spot size estimation
-    Alignment checks
-    Symmetry analysis
-
-<hr style="clear: both;">
-
-<!-- ................ LiveSheet ................... -->
-
-## ![LiveSheet](./icons/live_spreadsheet.svg) LiveSheet
-
-![screenshot](./examples/livesheet.png)
-
-    Edit spreadsheet values directly in a docked table
-    Trigger document recomputation automatically on change
-    Enable fast, interactive parameter studies
-    Avoid opening the standard spreadsheet editor
-    Support optical workflows requiring frequent updates
-
-## Examples
+## Herriot cell
 
 ![screenshot](./examples/screenshot_herriot.png)
 
+<!-- <br clear="all"> -->
+
+## Prisma
+
 ![screenshot](./examples/screenshot_prisma.png)
+
+<hr style="clear: both;">
 
 _Spectral ray tracing through a prism. Rays are color‑coded by wavelength, showing continuous chromatic dispersion and high‑density beam propagation._
 For this example, **Mesh tracing** is used, enabling tens of thousands of rays to be traced efficiently.

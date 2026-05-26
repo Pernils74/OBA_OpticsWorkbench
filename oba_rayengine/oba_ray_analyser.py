@@ -12,6 +12,8 @@ Ray analysis built on OBARayManager singleton.
 
 import math
 import numpy as np
+
+from OPTIMIZER.optimize_scoring import roundness_score_from_cov
 from .oba_ray_core import OBARayManager
 from collections import defaultdict
 
@@ -27,36 +29,67 @@ from collections import defaultdict
 # Kluster = “alla ray‑träffar på detta objekt, vid detta bounce, som kommer från samma tidigare yta”
 
 
-def aggregate_surface_clusters(
+def aggregate_interaction_clusters(
     *,
-    plane="XY",
     mode="final",
     min_hits=2,
 ):
     """
     Aggregate spatial clusters per optisk interaktion.
 
-    ✅ KLUSTERDEFINITION (oförändrad):
-        (object_name, bounce, prev_hit_label)
+    ✅ Precomputes:
+        - density
+        - roundness per plane (XY, XZ, YZ)
+        - basic power efficiency
 
-    ✅ BACKWARD COMPATIBLE:
-        Alla gamla fält finns kvar
+    ✅ Retains:
+        - centroid
+        - covariance
+        - spread
 
-    ✅ FORWARD COMPATIBLE:
-        Nya fält för scoring & Optuna finns med
+    ✅ Backward compatible (mostly)
     """
 
-    plane = plane.upper()
-    if plane not in ("XY", "XZ", "YZ"):
-        plane = "XY"
+    import numpy as np
+    import math
 
+    # --- local helpers (avoid circular imports) ---
+    def density_score(hit_count, radius):
+        if hit_count <= 0:
+            return 0.0
+        density = hit_count / (radius * radius + 1e-6)
+        return 1.0 - math.exp(-0.02 * density)
+
+    def radius_2d(points_2d, centroid_2d):
+        d = np.linalg.norm(points_2d - centroid_2d, axis=1)
+        return float(np.sqrt(np.mean(d**2)))
+
+    def roundness_score_from_cov(cov):
+        if cov is None:
+            return 0.0
+        try:
+            A = np.array(cov, dtype=float)
+            vals = np.linalg.eigvals(A)
+            lam_max = float(np.max(vals).real)
+            lam_min = float(np.min(vals).real)
+
+            if lam_max <= 0:
+                return 0.0
+
+            return float(np.clip(lam_min / lam_max, 0.0, 1.0))
+        except Exception:
+            return 0.0
+
+    # ---------------------------------------------------
+    # 0) LOAD RAYS
+    # ---------------------------------------------------
     rm = OBARayManager()
     rays = [r for r in rm.get_all_rays() if r.mode == mode]
 
     buckets = defaultdict(list)
 
     # ---------------------------------------------------
-    # 1) BUCKET: (object, bounce, prev_hit_label)
+    # 1) BUCKET
     # ---------------------------------------------------
     for ray in rays:
         for h in ray.history:
@@ -73,7 +106,17 @@ def aggregate_surface_clusters(
             if obj is None or bounce is None:
                 continue
 
-            buckets[(obj, bounce, prev)].append((last, h["hit_point"]))
+            extra = h.get("extra", {})
+
+            buckets[(obj, bounce, prev)].append(
+                (
+                    last,
+                    h["hit_point"],
+                    extra.get("power_in", 0.0),
+                    extra.get("power_out", 0.0),
+                    extra.get("absorbed_power", 0.0),
+                )
+            )
 
     # ---------------------------------------------------
     # 2) BUILD CLUSTERS
@@ -85,37 +128,239 @@ def aggregate_surface_clusters(
         if len(items) < min_hits:
             continue
 
-        pts = np.array([p for _, p in items], dtype=float)
-        last_hit_labels = sorted({l for l, _ in items})
+        pts = np.array([p for _, p, *_ in items], dtype=float)
 
-        # ---- centroids
+        # --- power ---
+        power_in = sum(pin for _, _, pin, _, _ in items)
+        power_out = sum(pout for _, _, _, pout, _ in items)
+        power_abs = sum(pabs for _, _, _, _, pabs in items)
+
+        power_efficiency = power_out / (power_in + 1e-9)
+
+        # --- labels ---
+        last_hit_labels = sorted({l for l, *_ in items})
+
+        # --- centroid ---
         centroid_3d = pts.mean(axis=0)
 
-        if plane == "XY":
-            proj = pts[:, [0, 1]]
-        elif plane == "XZ":
-            proj = pts[:, [0, 2]]
-        else:  # YZ
-            proj = pts[:, [1, 2]]
+        # ---------- PROJECTIONS ----------
+        proj = {
+            "XY": pts[:, [0, 1]],
+            "XZ": pts[:, [0, 2]],
+            "YZ": pts[:, [1, 2]],
+        }
 
-        centroid_plane = proj.mean(axis=0)
+        centroid_plane = {k: proj[k].mean(axis=0) for k in proj}
 
-        # ---- OLD radius (max) – behålls
+        # ---------- COV ----------
+        cov_plane = {k: np.cov(proj[k].T).tolist() if len(proj[k]) >= 3 else None for k in proj}
+
+        cov_3d = np.cov(pts.T).tolist() if len(pts) >= 3 else None
+
+        # ---------- RADIER ----------
         radius_3d_max = float(np.max(np.linalg.norm(pts - centroid_3d, axis=1)))
-
-        # ---- NEW radius (RMS) – för scoring
         radius_3d_rms = float(np.sqrt(np.mean(np.sum((pts - centroid_3d) ** 2, axis=1))))
 
-        # ---- covariance
+        # ---------------------------------------------------
+        # ✅ PRECOMPUTED METRICS
+        # ---------------------------------------------------
+        hit_count = len(pts)
+
+        # --- density (kan vara samma men dupliceras per plan för enkelhet)
+        density_3d = density_score(hit_count, radius_3d_rms)
+
+        # ---------- RADIER ----------
+        radius_3d_rms = float(np.sqrt(np.mean(np.sum((pts - centroid_3d) ** 2, axis=1))))
+
+        radius_xy = radius_2d(proj["XY"], centroid_plane["XY"])
+        radius_xz = radius_2d(proj["XZ"], centroid_plane["XZ"])
+        radius_yz = radius_2d(proj["YZ"], centroid_plane["YZ"])
+
+        # ---------- RAW DENSITY ----------
+        raw_3d = hit_count / (radius_3d_rms**3 + 1e-9)
+        raw_xy = hit_count / (radius_xy**2 + 1e-9)
+        raw_xz = hit_count / (radius_xz**2 + 1e-9)
+        raw_yz = hit_count / (radius_yz**2 + 1e-9)
+
+        # ---------- NORMALISERA ----------
+        def norm(x):
+            return 1.0 - math.exp(-0.01 * x)
+
+        # --- roundness
+        roundness_3d = roundness_score_from_cov(cov_3d)
+
+        # dämpa brus
+        # scale = scale ** 0.5   # mindre aggressivt
+        scale = min(1.0, hit_count / 20.0)
+
+        roundness_3d *= scale
+
+        roundness_vals = {
+            "3D": roundness_score_from_cov(cov_3d),
+            "XY": roundness_score_from_cov(cov_plane["XY"]),
+            "XZ": roundness_score_from_cov(cov_plane["XZ"]),
+            "YZ": roundness_score_from_cov(cov_plane["YZ"]),
+        }
+
+        roundness_vals = {k: v * scale for k, v in roundness_vals.items()}
+
+        # ---------------------------------------------------
+        cluster_id = f"{idx}:{obj}:B{bounce}:P{prev_hit_label}"
+        idx += 1
+
+        clusters[cluster_id] = {
+            # --------------------------------------------------
+            # CORE DATA
+            # --------------------------------------------------
+            "object": obj,
+            "bounce": bounce,
+            "prev_hit_label": prev_hit_label,
+            "last_hit_labels": last_hit_labels,
+            "hit_count": hit_count,
+            "points": pts,
+            "power": {
+                "in": float(power_in),
+                "out": float(power_out),
+                "absorbed": float(power_abs),
+                "efficiency": float(power_efficiency),
+            },
+            # --------------------------------------------------
+            # POSITION
+            # --------------------------------------------------
+            "centroid": {
+                "3D": tuple(map(float, centroid_3d)),
+                "XY": tuple(map(float, centroid_plane["XY"])),
+                "XZ": tuple(map(float, centroid_plane["XZ"])),
+                "YZ": tuple(map(float, centroid_plane["YZ"])),
+            },
+            # --------------------------------------------------
+            # SPREAD
+            # --------------------------------------------------
+            "spread": {
+                "3D": {
+                    "radius": float(radius_3d_rms),
+                    "radius_max": float(radius_3d_max),
+                    "cov": cov_3d,
+                },
+                "XY": {"cov": cov_plane["XY"]},
+                "XZ": {"cov": cov_plane["XZ"]},
+                "YZ": {"cov": cov_plane["YZ"]},
+            },
+            # --------------------------------------------------
+            # ✅ NEW: PRECOMPUTED METRICS
+            # --------------------------------------------------
+            # "density": {
+            #     "3D": norm(raw_3d),
+            #     "XY": norm(raw_xy),
+            #     "XZ": norm(raw_xz),
+            #     "YZ": norm(raw_yz),
+            # },
+            "density": {
+                "3D": raw_3d,
+                "XY": raw_xy,
+                "XZ": raw_xz,
+                "YZ": raw_yz,
+            },
+            "roundness": {
+                "3D": float(roundness_vals["3D"]),
+                "XY": float(roundness_vals["XY"]),
+                "XZ": float(roundness_vals["XZ"]),
+                "YZ": float(roundness_vals["YZ"]),
+            },
+        }
+
+    return clusters
+
+
+def aggregate_interaction_clusters_old(
+    *,
+    mode="final",
+    min_hits=2,
+):
+    """
+    Aggregate spatial clusters per optisk interaktion.
+
+    ✅ Alla plan räknas ut (XY, XZ, YZ)
+    ✅ Backward compatible (delvis)
+    """
+
+    rm = OBARayManager()
+    rays = [r for r in rm.get_all_rays() if r.mode == mode]
+
+    buckets = defaultdict(list)
+
+    # ---------------------------------------------------
+    # 1) BUCKET
+    # ---------------------------------------------------
+    for ray in rays:
+        for h in ray.history:
+            if not isinstance(h, dict):
+                continue
+            if "hit_point" not in h:
+                continue
+
+            obj = h.get("object_name")
+            bounce = h.get("bounce_index")
+            prev = h.get("prev_hit_label")
+            last = h.get("last_hit_label")
+
+            if obj is None or bounce is None:
+                continue
+            # buckets[(obj, bounce, prev)].append((last, h["hit_point"]))
+            extra = h.get("extra", {})
+            buckets[(obj, bounce, prev)].append(
+                (
+                    last,
+                    h["hit_point"],
+                    extra.get("power_in", 0.0),
+                    extra.get("power_out", 0.0),
+                    extra.get("absorbed_power", 0.0),
+                )
+            )
+
+    # ---------------------------------------------------
+    # 2) BUILD CLUSTERS
+    # ---------------------------------------------------
+    clusters = {}
+    idx = 0
+
+    for (obj, bounce, prev_hit_label), items in buckets.items():
+        if len(items) < min_hits:
+            continue
+
+        # pts = np.array([p for _, p in items], dtype=float)
+        pts = np.array([p for _, p, *_ in items], dtype=float)
+        power_in = sum(pin for _, _, pin, _, _ in items)
+        power_out = sum(pout for _, _, _, pout, _ in items)
+        power_abs = sum(pabs for _, _, _, _, pabs in items)
+
+        last_hit_labels = sorted({l for l, *_ in items})
+
+        centroid_3d = pts.mean(axis=0)
+
+        # ---------- ALL PLANES ----------
+        proj = {
+            "XY": pts[:, [0, 1]],
+            "XZ": pts[:, [0, 2]],
+            "YZ": pts[:, [1, 2]],
+        }
+
+        centroid_plane = {k: proj[k].mean(axis=0) for k in proj}
+
+        cov_plane = {k: np.cov(proj[k].T).tolist() if len(proj[k]) >= 3 else None for k in proj}
+
+        # ---------- RADIER ----------
+        radius_3d_max = float(np.max(np.linalg.norm(pts - centroid_3d, axis=1)))
+        radius_3d_rms = float(np.sqrt(np.mean(np.sum((pts - centroid_3d) ** 2, axis=1))))
+
         cov_3d = np.cov(pts.T) if len(pts) >= 3 else None
-        cov_plane = np.cov(proj.T) if len(proj) >= 3 else None
 
         cluster_id = f"{idx}:{obj}:B{bounce}:P{prev_hit_label}"
         idx += 1
 
         clusters[cluster_id] = {
             # --------------------------------------------------
-            # 🔒 GAMLA FÄLT (BACKWARD KOMPATIBLA)
+            # GAMLA
             # --------------------------------------------------
             "object": obj,
             "bounce": bounce,
@@ -123,124 +368,41 @@ def aggregate_surface_clusters(
             "last_hit_labels": last_hit_labels,
             "hit_count": len(pts),
             "points": pts,
-            "centroid_3d": centroid_3d,
-            "centroid_plane": centroid_plane,
-            "radius_3d": radius_3d_max,  # ← exakt som förr
-            "plane": plane,
+            "power": {
+                "in": float(power_in),
+                "out": float(power_out),
+                "absorbed": float(power_abs),
+            },
             # --------------------------------------------------
-            # ✅ NY STRUKTUR (SCORING / OPTUNA)
+            # SCORING STRUCTURE
             # --------------------------------------------------
-            "count": len(pts),  # alias (valfritt, men OK)
+            # ✅ POSITION
             "centroid": {
                 "3D": tuple(map(float, centroid_3d)),
+                "XY": tuple(map(float, centroid_plane["XY"])),
+                "XZ": tuple(map(float, centroid_plane["XZ"])),
+                "YZ": tuple(map(float, centroid_plane["YZ"])),
             },
+            # ✅ SPRIDNING  cov = covariance matrix (kovariansmatris)
             "spread": {
                 "3D": {
-                    "radius": float(radius_3d_rms),  # ← RMS för density
-                    "radius_max": float(radius_3d_max),  # ← extra info
+                    "radius": float(radius_3d_rms),
+                    "radius_max": float(radius_3d_max),
                     "cov": cov_3d.tolist() if cov_3d is not None else None,
                 },
-                plane: {
-                    "cov": cov_plane.tolist() if cov_plane is not None else None,
+                "XY": {
+                    "cov": cov_plane["XY"],
+                },
+                "XZ": {
+                    "cov": cov_plane["XZ"],
+                },
+                "YZ": {
+                    "cov": cov_plane["YZ"],
                 },
             },
         }
 
     return clusters
-
-
-# def aggregate_surface_clusters___old(
-#     *,
-#     plane="XY",
-#     mode="final",
-#     min_hits=2,
-# ):
-#     """
-#     Aggregate spatial clusters per optisk interaktion.
-
-#     ✅ KORREKT KLUSTERDEFINITION:
-#         (object_name, bounce, prev_hit_label)
-
-#     Detta betyder:
-#         - alla träffar på samma objekt
-#         - vid samma bounce
-#         - som kommer från samma tidigare yta
-#         → ett kluster
-
-#     last_hit_label behandlas som metadata (beskrivande, ej split).
-#     """
-
-#     plane = plane.upper()
-#     if plane not in ("XY", "XZ", "YZ"):
-#         plane = "XY"
-
-#     rm = OBARayManager()
-#     rays = [r for r in rm.get_all_rays() if r.mode == mode]
-
-#     buckets = defaultdict(list)
-
-#     # ---------------------------------------------------
-#     # 1) BUCKET: (object, bounce, prev_hit_label)
-#     # ---------------------------------------------------
-#     for ray in rays:
-#         for h in ray.history:
-#             if not isinstance(h, dict):
-#                 continue
-#             if "hit_point" not in h:
-#                 continue
-
-#             obj = h.get("object_name")
-#             bounce = h.get("bounce_index")
-#             prev = h.get("prev_hit_label")
-#             last = h.get("last_hit_label")
-
-#             if obj is None or bounce is None:
-#                 continue
-
-#             buckets[(obj, bounce, prev)].append((last, h["hit_point"]))
-
-#     # ---------------------------------------------------
-#     # 2) BUILD CLUSTERS
-#     # ---------------------------------------------------
-#     clusters = {}
-#     idx = 0
-
-#     for (obj, bounce, prev_hit_label), items in buckets.items():
-#         if len(items) < min_hits:
-#             continue
-
-#         pts = np.array([p for _, p in items], dtype=float)
-#         last_hit_labels = sorted({l for l, _ in items})
-
-#         centroid_3d = pts.mean(axis=0)
-
-#         if plane == "XY":
-#             proj = pts[:, [0, 1]]
-#         elif plane == "XZ":
-#             proj = pts[:, [0, 2]]
-#         else:  # YZ
-#             proj = pts[:, [1, 2]]
-
-#         centroid_plane = proj.mean(axis=0)
-#         radius_3d = float(np.max(np.linalg.norm(pts - centroid_3d, axis=1)))
-
-#         cluster_id = f"{idx}:{obj}:B{bounce}:P{prev_hit_label}"
-#         idx += 1
-
-#         clusters[cluster_id] = {
-#             "object": obj,
-#             "bounce": bounce,
-#             "prev_hit_label": prev_hit_label,
-#             "last_hit_labels": last_hit_labels,  # ← metadata!
-#             "hit_count": len(pts),
-#             "points": pts,
-#             "centroid_3d": centroid_3d,
-#             "centroid_plane": centroid_plane,
-#             "radius_3d": radius_3d,
-#             "plane": plane,
-#         }
-
-#     return clusters
 
 
 def debug_print_surface_clusters(
@@ -259,7 +421,7 @@ def debug_print_surface_clusters(
     last_hit_labels visas som metadata (inte struktur).
     """
 
-    clusters = aggregate_surface_clusters(
+    clusters = aggregate_interaction_clusters(
         plane=plane,
         mode=mode,
         min_hits=min_hits,

@@ -153,6 +153,7 @@ class OBARayEngine:
             bounce_max = cfg.RayBounceMax
             line_width = cfg.RayLineWidth
             color_by_bounce = cfg.ColorByBounce
+            show_log = getattr(cfg, "ShowLog", False)
         else:
             # 🔥 Ingen RayConfig → implicit preview
             run_final = False
@@ -163,10 +164,12 @@ class OBARayEngine:
             bounce_max = None
             line_width = 2.0
             color_by_bounce = False
+            show_log = False
 
         run_mode = "final" if run_final else "preview"
 
-        log = get_logger()
+        log = get_logger(show_log=show_log)
+
         log.start("TOTAL", "RayCollector Execute()")
         # --------------------------------------------------
         # 1. Samla scenen
@@ -274,7 +277,7 @@ class OBARayEngine:
 
         log.end("VIS")
         log.end("TOTAL")
-        log.flush()
+        log.flush("ActiveRays: " + str(len(rm.get_all_rays())))
         log.clear()
 
         return
@@ -395,7 +398,9 @@ class OBARayEngine:
             if not point or not normal:
                 continue
 
-            sign = -1 if obj.FlipNormal else 1
+            flip = getattr(obj, "FlipNormal", False)
+            sign = -1 if flip else 1
+            # sign = -1 if obj.FlipNormal else 1
 
             rm.draw_normal_arrow(
                 origin=point,

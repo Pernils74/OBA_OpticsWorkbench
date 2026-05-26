@@ -79,38 +79,6 @@ class OBARay:
     # LOGGNING
     # -----------------------------
 
-    def log_bounce_utan_prevoius_face(
-        self,
-        object_name,
-        optical_type,
-        hit_face,
-        hit_point,
-        normal,
-        incoming_dir,
-        outgoing_dir,
-        extra=None,
-    ):
-        entry = {
-            "ray_id": str(self.id),
-            "parent_id": str(self.parent_id) if self.parent_id else None,
-            "object_name": object_name,
-            "optical_type": optical_type,
-            # var träffen sker
-            "face_id": str(hit_face),
-            # 🔥 hämta automatiskt från ray state
-            "prev_face": str(self.prev_hit_face) if self.prev_hit_face else None,
-            "hit_point": (hit_point.x, hit_point.y, hit_point.z),
-            "normal": (normal.x, normal.y, normal.z),
-            "incoming_dir": ((incoming_dir.x, incoming_dir.y, incoming_dir.z) if incoming_dir else None),
-            "outgoing_dir": ((outgoing_dir.x, outgoing_dir.y, outgoing_dir.z) if outgoing_dir else None),
-            "bounce_index": self.bounce_count,
-        }
-
-        if extra:
-            entry["extra"] = extra
-
-        self.history.append(entry)
-
     def log_bounce(
         self,
         object_name,
@@ -170,7 +138,8 @@ class OBARay:
             mode=self.mode,
             parent_id=self.id,  # vilken händelse skapade mig
             path_id=self.path_id,  # Ärver path_id så att alla i samma "gren" har samma path_id. vilken fysisk stråle tillhör jag?
-            medium_stack=self.medium_stack,  # 🔥 ÄRVER STACKEN
+            # 🔥 ✅ SKAPA EN KOPIA AV LISTAN (list() eller .copy())
+            medium_stack=list(self.medium_stack),
         )
 
         child.last_facet = self.last_facet
@@ -510,7 +479,7 @@ class OBARayManager:
 
             colors.append((r, g, b))
 
-        print("VALID RAYS:", valid)
+        # print("VALID RAYS:", valid)
 
         if not all_coords:
             self._coin_root.touch()

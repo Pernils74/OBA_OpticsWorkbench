@@ -6,6 +6,9 @@ from PySide import QtCore
 # --- fungerar i alla lägen ---
 
 
+IS_ACTIVE = True
+
+
 # def get_module_dir():
 #     if "__file__" in globals() and globals()["__file__"]:
 #         return os.path.dirname(os.path.abspath(__file__))
@@ -80,6 +83,14 @@ class OBA_Optics(Gui.Workbench):
         )
 
         hot_reload.register_command(
+            command="OBA_CreateDetector",
+            impl_module="oba_objects.oba_detector",
+            menu="Skapa Detector",
+            tooltip="Skapar detector",
+            pixmap=get_icon("oba_detector.svg"),
+        )
+
+        hot_reload.register_command(
             command="OBA_CreateLense",
             impl_module="oba_objects.oba_lens",
             menu="Skapa Lense",
@@ -104,6 +115,34 @@ class OBA_Optics(Gui.Workbench):
         )
 
         # -------------------------
+        # --------- Builders --------
+        # -------------------------
+
+        hot_reload.register_command(
+            command="OBA_CreateMirrorBuilder",
+            impl_module="oba_objects.oba_mirrorbuilder",
+            menu="Mirror builder",
+            tooltip="Mirror builder",
+            pixmap=get_icon("oba_mirrorbuilder.svg"),
+        )
+
+        hot_reload.register_command(
+            command="OBA_CreateLensBuilder",
+            impl_module="oba_objects.oba_lensbuilder",
+            menu="Lens builder",
+            tooltip="Lens builder",
+            pixmap=get_icon("oba_lensbuilder.svg"),
+        )
+
+        hot_reload.register_command(
+            command="OBA_CreatePlaneBuilder",
+            impl_module="oba_objects.oba_planebuilder",
+            menu="Plane builder",
+            tooltip="Plane builder",
+            pixmap=get_icon("oba_planebuilder.svg"),
+        )
+
+        # -------------------------
         # --------- Utils --------
         # -------------------------
 
@@ -125,7 +164,7 @@ class OBA_Optics(Gui.Workbench):
 
         hot_reload.register_command(
             command="OBA_ShowXYZLiveList",
-            impl_module="plots.show_xyz_live_list",
+            impl_module="oba_plots.show_xyz_live_list",
             menu="Show xyz list",
             tooltip="Visa XYZ-lista",
             pixmap=get_icon("xyz_list.svg"),
@@ -234,11 +273,16 @@ class OBA_Optics(Gui.Workbench):
             "OBA_CreateEmitter",
             "OBA_CreateMirror",
             "OBA_CreateAbsorber",
+            "OBA_CreateDetector",
             "OBA_CreateLense",
             "OBA_CreateGrating",
             "OBA_CreateRayConfig",
             "OBA_ShowRayBounceRange",
-            SEP(),
+            SEP(),  # Builders
+            "OBA_CreateMirrorBuilder",
+            "OBA_CreateLensBuilder",
+            "OBA_CreatePlaneBuilder",
+            SEP(),  # utils
             "ShowClusterPlotDialog",
             "ShowPowerDensityPlotDialog",
             "ShowPowerVsHitPlotDialog",
@@ -262,9 +306,8 @@ class OBA_Optics(Gui.Workbench):
         self.appendMenu("OBA optics", self.list + ["OBA_ExampleHerriottCell", "OBA_ExamplePrismGradient"])
 
     def Activated(self):
-        import hot_reload
-
-        hot_reload.start_auto_reload()
+        # import hot_reload
+        # hot_reload.start_auto_reload()
 
         # 2. Öppna testfil
         # file_path = r"C:\temp\S12_orginal.FCStd"
@@ -285,15 +328,18 @@ class OBA_Optics(Gui.Workbench):
         Gui.activateWorkbench("OBA_Optics")
 
     def Deactivated(self):
-        import hot_reload
-
-        hot_reload.stop_auto_reload()
+        # import hot_reload
+        # hot_reload.stop_auto_reload()
+        pass
 
     def GetClassName(self):
         return "Gui::PythonWorkbench"
 
 
-Gui.addWorkbench(OBA_Optics())
+if IS_ACTIVE:
+    Gui.addWorkbench(OBA_Optics())
+
+
 # Gui.activateWorkbench("OBA_2Workbench")
 # Gui.runCommand("Std_ComboView", 0)
 # Gui.runCommand("Std_ReportView", 0)

@@ -5,7 +5,6 @@ import FreeCADGui as Gui
 from PySide import QtWidgets
 from .oba_base import OBABaseDialog, OBAElementProxy, OBAViewProviderBase  # , runRaytracer
 
-
 # ============================================================
 #  O B J E K T  –  A B S O R B E R
 # ============================================================
@@ -31,7 +30,7 @@ class OBAAbsorber(OBAElementProxy):
             self.add_binders(obj, source_obj, sub_elements)
 
     def onDocumentRestored(self, obj):
-        """Återställer logik utan att skapa serialiseringsproblem"""
+        """Återställer logik och GUI-koppling vid laddning"""
         obj.Proxy = self
         self.Object = obj
         App.Console.PrintMessage(f"Restoring {obj.Label}\n")
@@ -121,10 +120,13 @@ def OBA_CreateAbsorber(show_dialog=True):
     doc.recompute()
 
     # Visa dialog direkt
+
+    # Visa dialog direkt
     if show_dialog:
         AbsorberDialog(absorber_obj).show()
+    # AbsorberDialog(absorber_obj).show()
 
-    return absorber_obj
+    # return absorber_obj
 
 
 # ============================================================
@@ -132,13 +134,13 @@ def OBA_CreateAbsorber(show_dialog=True):
 # ============================================================
 
 
-class _CmdAbsorber:
-    def GetResources(self):
-        return {"MenuText": "Create Absorber"}
+# class _CmdAbsorber:
+#     def GetResources(self):
+#         return {"MenuText": "Create Absorber"}
 
-    def Activated(self):
-        OBA_CreateAbsorber()
+#     def Activated(self):
+#         OBA_CreateAbsorber()
 
 
-if "OBA_CreateAbsorber" not in Gui.listCommands():
-    Gui.addCommand("OBA_CreateAbsorber", _CmdAbsorber())
+# if "OBA_CreateAbsorber" not in Gui.listCommands():
+#     Gui.addCommand("OBA_CreateAbsorber", _CmdAbsorber())
