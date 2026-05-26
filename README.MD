@@ -1,4 +1,4 @@
-# OBA Opticsworkbench
+# OBA Opticsworkbench v 0.4
 
 ---
 
