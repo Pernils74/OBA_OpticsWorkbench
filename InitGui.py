@@ -6,7 +6,7 @@ from PySide import QtCore
 # --- fungerar i alla lägen ---
 
 
-IS_ACTIVE = True
+IS_ACTIVE = False
 
 
 # def get_module_dir():

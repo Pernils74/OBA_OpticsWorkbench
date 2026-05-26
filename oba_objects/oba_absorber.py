@@ -126,7 +126,7 @@ def OBA_CreateAbsorber(show_dialog=True):
         AbsorberDialog(absorber_obj).show()
     # AbsorberDialog(absorber_obj).show()
 
-    # return absorber_obj
+    return absorber_obj
 
 
 # ============================================================
