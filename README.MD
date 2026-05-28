@@ -59,6 +59,12 @@ https://github.com/chbergmann/OpticsWorkbench
   - Added builder tools for creating optical geometry
     ![Lensbuilder](./icons/oba_lensbuilder.svg) ![Mirrorbuilder](./icons/oba_mirrorbuilder.svg) ![Planebuilder](./icons/oba_planebuilder.svg)
 
+### Version 0.5
+
+- Major overhaul of the scanner
+  - Improved stability and consistency in object movement handling
+  - Refactored scan workflow (offset → trace → store)
+
 # 🔧 Installation
 
 ---

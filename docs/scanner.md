@@ -67,9 +67,9 @@
 
 - `Reload` Reloads document structure from the database
 
-- `Delete`Permanently removes the selected document from the database
+- `Step` Selects the scan step to visualize
 
-- `Target Object` Selects the scanned target object.
+- `Target` Selects the scanned target object.
 
 - `Value` Selects which quantity is visualized. Hits — number of ray hits. Power In — incoming power at the hit. Power Out — remaining power after interaction.
 
@@ -87,34 +87,20 @@
 
 - `Show %` Normalizes values to percentage of the maximum.
 
+- `2D plane view` Enables interactive 2D slice view.
+
+- _(Clickable surfaces)_  
+  When enabled, allows clicking directly on the plot to probe positions and trigger new scans.
+
 ### Visualization
 
-    Heatmap Surface (3D)
+- **3D Heatmap**  
+  Displays spatial distribution of the selected value.
 
-    Displays a 3D surface plot of the selected value
-    Height represents accumulated value
-    Color map: viridis
-    Updated dynamically on data or option changes
+- **Cross-section profiles**  
+  Shows X and Y profiles of the selected plane (right-side plot).
 
-##### Clickable surface
-
-    When **Clickable surface** is enabled:
-
-    Clicking the surface selects a scan position (offset)
-    A red marker shows the selected point in the 3D plot
-    The corresponding offset is applied to the moved objects in the FreeCAD scene
-
-#### Profiles
-
-    Displays cross‑sectional profiles through the heatmap:
-
-    X profile — center row
-    Y profile — center column
-
-    Useful for:
-
-    Spot size estimation
-    Alignment checks
-    Symmetry analysis
+- **Interactive probing**  
+  Clicking in 2D mode allows direct inspection of specific positions and triggers trace evaluation.
 
 <hr style="clear: both;">
