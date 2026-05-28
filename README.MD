@@ -1,4 +1,4 @@
-# OBA Opticsworkbench v 0.5
+# OBA Opticsworkbench v 0.5.1
 
 ---
 
@@ -64,6 +64,10 @@ https://github.com/chbergmann/OpticsWorkbench
 - Major overhaul of the scanner
   - Improved stability and consistency in object movement handling
   - Refactored scan workflow (offset → trace → store)
+
+### Version 0.5.1
+
+- Buggfix for click in 2d heatmap in scanner function
 
 # 🔧 Installation
 
