@@ -57,7 +57,6 @@ https://github.com/chbergmann/OpticsWorkbench
   - `Detector` (passive hit observer) ![Detector](./icons/oba_detector.svg)
 - Builders:
   - Added builder tools for creating optical geometry
-    ![Lensbuilder](./icons/oba_lensbuilder.svg) ![Mirrorbuilder](./icons/oba_mirrorbuilder.svg) ![Planebuilder](./icons/oba_planebuilder.svg)
 
 ### Version 0.5
 
@@ -68,6 +67,13 @@ https://github.com/chbergmann/OpticsWorkbench
 ### Version 0.5.1
 
 - Buggfix for click in 2d heatmap in scanner function
+
+### Version 0.6
+
+- Fix: Correct handling of global ray max length across bounces
+- Power vs Hit Plot: Improved user experience and more metrics
+- Heatmap viewer : Added run and commit buttons
+- Introduced a new geometry construction system **(Experimental)** ![Objectbuilder](./icons/oba_optical_object.svg)
 
 # 🔧 Installation
 

@@ -6,7 +6,7 @@ from PySide import QtCore
 # --- fungerar i alla lägen ---
 
 
-IS_ACTIVE = True
+IS_ACTIVE = False
 
 
 # def get_module_dir():
@@ -91,7 +91,7 @@ class OBA_Optics(Gui.Workbench):
         )
 
         hot_reload.register_command(
-            command="OBA_CreateLense",
+            command="OBA_CreateLens",
             impl_module="oba_objects.oba_lens",
             menu="Skapa Lense",
             tooltip="Skapar lins",
@@ -119,27 +119,11 @@ class OBA_Optics(Gui.Workbench):
         # -------------------------
 
         hot_reload.register_command(
-            command="OBA_CreateMirrorBuilder",
-            impl_module="oba_objects.oba_mirrorbuilder",
-            menu="Mirror builder",
-            tooltip="Mirror builder",
-            pixmap=get_icon("oba_mirrorbuilder.svg"),
-        )
-
-        hot_reload.register_command(
-            command="OBA_CreateLensBuilder",
-            impl_module="oba_objects.oba_lensbuilder",
-            menu="Lens builder",
-            tooltip="Lens builder",
-            pixmap=get_icon("oba_lensbuilder.svg"),
-        )
-
-        hot_reload.register_command(
-            command="OBA_CreatePlaneBuilder",
-            impl_module="oba_objects.oba_planebuilder",
-            menu="Plane builder",
-            tooltip="Plane builder",
-            pixmap=get_icon("oba_planebuilder.svg"),
+            command="OBA_CreateOpticalObject",
+            impl_module="oba_objects.oba_optical_base",
+            menu="Nya optial object",
+            tooltip="Rensa logger",
+            pixmap=get_icon("oba_optical_object.svg"),
         )
 
         # -------------------------
@@ -274,14 +258,12 @@ class OBA_Optics(Gui.Workbench):
             "OBA_CreateMirror",
             "OBA_CreateAbsorber",
             "OBA_CreateDetector",
-            "OBA_CreateLense",
+            "OBA_CreateLens",
             "OBA_CreateGrating",
             "OBA_CreateRayConfig",
             "OBA_ShowRayBounceRange",
             SEP(),  # Builders
-            "OBA_CreateMirrorBuilder",
-            "OBA_CreateLensBuilder",
-            "OBA_CreatePlaneBuilder",
+            "OBA_CreateOpticalObject",
             SEP(),  # utils
             "ShowClusterPlotDialog",
             "ShowPowerDensityPlotDialog",
@@ -291,8 +273,8 @@ class OBA_Optics(Gui.Workbench):
             "OBA_ShowXYZLiveList",
             "OBA_ShowLiveSheetsDock",
             SEP(),
-            # "OBA_ExampleHerriottCell",
-            # "OBA_ExamplePrismGradient",
+            "OBA_ExampleHerriottCell",
+            "OBA_ExamplePrismGradient",
             # SEP(),
             # "OBA_ReloadWorkbench",
             # "OBA_FeatureScan",
