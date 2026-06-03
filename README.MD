@@ -13,6 +13,8 @@ While this workbench focuses on 3D optical systems, the original **OpticsWorkben
 The original Optical Workbench can be found here:
 https://github.com/chbergmann/OpticsWorkbench
 
+Dedicated forum thread for this bench can be found here: https://forum.freecad.org/viewtopic.php?t=105011
+
 ## Changelog
 
 ---
