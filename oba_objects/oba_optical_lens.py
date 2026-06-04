@@ -10,7 +10,7 @@ from .oba_lens_materials import (
 # OPTICAL PROPERTIES (✅ endast optik)
 # ============================================================
 
-OPTICAL_PROPERTIES = [
+EXTRA_PROPERTIES = [
     {
         "type": "App::PropertyFloat",
         "name": "Focal",
@@ -37,6 +37,9 @@ OPTICAL_PROPERTIES = [
 ]
 
 
+SUPPORTED_SHAPES = ["Plane", "PlanoConvex", "PlanoConcave", "BiConvex", "BiConcave"]
+
+
 TRIGGER_PROPS = {
     "Material",
     "Focal",
@@ -57,10 +60,10 @@ def init_material(obj):
 
     mats = [m for m in get_material_list() if m != "Air"]
 
-    # ✅ Sätt enum-lista
+    # # ✅ Sätt enum-lista
     obj.Material = mats
 
-    # ✅ Sätt värde SOM FINNS I LISTAN
+    # # ✅ Sätt värde SOM FINNS I LISTAN
     if obj.Material not in mats:
         obj.Material = mats[0]
 
@@ -135,76 +138,72 @@ def calculate_focal(obj):
 
 
 def update_calculated_properties(obj):
-    print("updated är kallad")
-    if not hasattr(obj, "Focal"):
-        return
+    updated = []
 
     material = getattr(obj, "Material", "N-BK7")
 
     n = get_refractive_index(material, wavelength_nm=getattr(obj, "Wavelength", 550.0))
 
-    if material == "Air":
-        App.Console.PrintWarning("Air is not a valid lens material\n")
-        return
-
     if n <= 1.0:
-        return
+        return updated
 
     f = obj.Focal
     st = obj.ShapeType
 
     try:
-
-        # ----------------------------------------------------
-        # PLANO CONVEX
-        # ----------------------------------------------------
         if st == "PlanoConvex":
-
             if f == 0:
-                return
+                return updated
 
             R = f * (n - 1.0)
-            obj.Radius1 = R
 
-        # ----------------------------------------------------
-        # PLANO CONCAVE
-        # ----------------------------------------------------
+            if obj.Radius1 != R:
+                obj.Radius1 = R
+                updated.append("Radius1")
+
         elif st == "PlanoConcave":
-
             if f == 0:
-                return
+                return updated
 
             R = -f * (n - 1.0)
-            obj.Radius1 = abs(R)
+            R = abs(R)
 
-        # ----------------------------------------------------
-        # BI CONVEX
-        # ----------------------------------------------------
+            if obj.Radius1 != R:
+                obj.Radius1 = R
+                updated.append("Radius1")
+
         elif st == "BiConvex":
-
             if f == 0:
-                return
+                return updated
 
             R = 2.0 * f * (n - 1.0)
 
-            obj.Radius1 = R
-            obj.Radius2 = -R
+            if obj.Radius1 != R:
+                obj.Radius1 = R
+                updated.append("Radius1")
 
-        # ----------------------------------------------------
-        # BI CONCAVE
-        # ----------------------------------------------------
+            if obj.Radius2 != -R:
+                obj.Radius2 = -R
+                updated.append("Radius2")
+
         elif st == "BiConcave":
-
             if f == 0:
-                return
+                return updated
 
             R = -2.0 * f * (n - 1.0)
 
-            obj.Radius1 = R
-            obj.Radius2 = -R
+            if obj.Radius1 != R:
+                obj.Radius1 = R
+                updated.append("Radius1")
+
+            if obj.Radius2 != -R:
+                obj.Radius2 = -R
+                updated.append("Radius2")
 
     except:
         pass
+
+    return updated
 
 
 # ============================================================
@@ -239,10 +238,11 @@ def build_dialog(dlg, obj, layout):
         row.addWidget(cmb)
         layout.addLayout(row)
 
-    if obj.ShapeType != "Plane":
+    print("objjj", obj)
+    if obj.ShapeModel != "Plane":
         # ✅ Focal
-        dlg._spin(layout, "Focal", "Focal")
+        dlg._create_widget(layout, "Focal")
         # ✅ Wavelength
-        dlg._spin(layout, "Wavelength", "Wavelength")
+        dlg._create_widget(layout, "Wavelength")
 
-        dlg._check(layout, "UseFresnel", "UseFresnel")
+        dlg._create_widget(layout, "UseFresnel")

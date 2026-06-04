@@ -2,7 +2,7 @@
 
 from PySide import QtWidgets
 
-from .oba_mirror import OPTICAL_PROPERTIES
+from .oba_mirror import MIRROR_PROPERTIES as OPTICAL_PROPERTIES
 
 # ============================================================
 # OPTICAL PROPERTIES (✅ endast optik)
@@ -93,7 +93,6 @@ def update_calculated_properties(obj):
 
 
 def build_dialog(dlg, obj, layout):
-    return
     for p in OPTICAL_PROPERTIES:
         dlg._spin(layout, p["name"], p["name"])
 

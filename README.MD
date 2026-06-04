@@ -77,6 +77,16 @@ Dedicated forum thread for this bench can be found here: https://forum.freecad.o
 - Heatmap viewer : Added run and commit buttons
 - Introduced a new geometry construction system **(Experimental)** ![Objectbuilder](./icons/oba_optical_object.svg)
 
+### Version 0.6.1
+
+- Added **"Show Labels"** toggle in _Power vs Hit Plot_
+- Added **"Show Legend"** toggle in _Power vs Hit Plot_
+
+- Reworked **Optical Builder architecture**
+  - Improved structure and modularity
+  - Better separation between geometry, optics, and behavior
+  - More robust foundation for future optical features
+
 # 🔧 Installation
 
 ---
