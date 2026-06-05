@@ -108,6 +108,8 @@ Dedicated forum thread for this bench can be found here: https://forum.freecad.o
 
     ```
 
+** Note the folder name ! **
+
 # Optical objects
 
 ---
