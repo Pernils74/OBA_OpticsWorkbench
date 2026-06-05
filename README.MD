@@ -90,6 +90,7 @@ Dedicated forum thread for this bench can be found here: https://forum.freecad.o
   ### Version 0.6.2
 
 - Added more metrics in power vs hit plot.
+- Fixed broken logger in the public version
 
 # 🔧 Installation
 

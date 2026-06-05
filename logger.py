@@ -8,6 +8,7 @@ import FreeCADGui as Gui
 class Logger:
     _instance = None
     _lock = threading.Lock()
+    _show_log = False
 
     def __new__(cls):
         with cls._lock:
@@ -67,23 +68,24 @@ class Logger:
     # Print everything at the end
     # -----------------------------------------------
 
-    def flush(self):
+    def flush(self, extra_str=""):
+        if self._show_log:
+            now_str = datetime.now().strftime("%H:%M:%S")
+            App.Console.PrintLog(f"\n================= TRACE LOG [{now_str}] {extra_str} =================")
 
-        now_str = datetime.now().strftime("%H:%M:%S")
-        App.Console.PrintLog(f"\n=================== TRACE LOG [{now_str}] ===================")
+            for sec_id in self._order:
+                sec = self._sections[sec_id]
+                start = sec["start"]
+                end = sec["end"] if sec["end"] else time.time()
+                duration = end - start
 
-        for sec_id in self._order:
-            sec = self._sections[sec_id]
-            start = sec["start"]
-            end = sec["end"] if sec["end"] else time.time()
-            duration = end - start
+                # *** Duration först ***
+                App.Console.PrintLog(f"\n({duration:.4f} s) ▶ {sec_id} — {sec['header']}")
 
-            # *** Duration först ***
-            App.Console.PrintLog(f"\n({duration:.4f} s) ▶ {sec_id} — {sec['header']}")
+                for line in sec["logs"]:
+                    App.Console.PrintLog("   " + line)
 
-            for line in sec["logs"]:
-                App.Console.PrintLog("   " + line)
-
+        self.clear()
         # total = time.time() - self._global_start
         # App.Console.PrintLog("\n-------------------------------------------------")
         # App.Console.PrintLog(f"TOTAL RUNTIME: {total:.4f} s")
@@ -99,7 +101,8 @@ if "LoggerSingleton" not in globals():
     LoggerSingleton = Logger()
 
 
-def get_logger():
+def get_logger(show_log=False):
+    LoggerSingleton._show_log = show_log
     return LoggerSingleton
 
 
