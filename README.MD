@@ -1,4 +1,4 @@
-# OBA Opticsworkbench v 0.6.1
+# OBA Opticsworkbench v 0.6.2
 
 ---
 
@@ -86,6 +86,10 @@ Dedicated forum thread for this bench can be found here: https://forum.freecad.o
   - Improved structure and modularity
   - Better separation between geometry, optics, and behavior
   - More robust foundation for future optical features
+
+  ### Version 0.6.2
+
+- Added more metrics in power vs hit plot.
 
 # 🔧 Installation
 
