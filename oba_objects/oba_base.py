@@ -89,21 +89,6 @@ def _trigger_ray_engine(reason="", source=None, force=False):
 # ============================================================
 
 
-def is_interactive_transform_old():
-    import FreeCADGui as Gui
-
-    return any(
-        Gui.isCommandActive(cmd)
-        for cmd in (
-            "Std_TransformManip",
-            "Std_Transform",
-            "Std_Move",
-            "Draft_Move",
-            "Draft_Translate",
-        )
-    )
-
-
 def is_interactive_transform():
     # 1. GUI‑kommandon (kan vara instabila!)
     cmds = (
@@ -240,23 +225,18 @@ class OBARealtimeObserver:
         for opt in doc.findObjects("App::DocumentObjectGroupPython"):
             if not hasattr(opt, "Binders"):
                 continue
-
             for b in opt.Binders:
                 if not b.Support:
                     continue
-
                 src = b.Support[0][0]
-
                 # Direkta träffen
                 if src is changed_obj:
                     affected.append(opt)
                     break
-
                 # Body → Feature → Binder
                 if changed_obj.isDerivedFrom("PartDesign::Body") and src.isDerivedFrom("PartDesign::Feature") and src.getParentGeoFeatureGroup() is changed_obj:
                     affected.append(opt)
                     break
-
         return affected
 
     def _affected_optical_objects_old(self, doc, changed_obj):
@@ -265,15 +245,12 @@ class OBARealtimeObserver:
         av förändringen i changed_obj.
         """
         affected = []
-
         for opt in doc.findObjects("App::DocumentObjectGroupPython"):
             if not hasattr(opt, "Binders"):
                 continue
-
             for b in opt.Binders:
                 if not b.Support:
                     continue
-
                 src = b.Support[0][0]
                 print(f"Checking {opt.Name} binder source {src.Name} against changed {changed_obj.Name}, src type {type(src)}, changed type {type(changed_obj)}")
 
@@ -317,19 +294,15 @@ class OBARealtimeObserver:
     # This reproduces the historical RayCollector.execute() behavior.
     # Ray tracing during interactive transforms is invalid because
     # the geometric model is not yet committed in FreeCAD.
-
     def _flush(self):
         if self.drag_active is False:
             return
-
         if not self._dirty_sources:
             return
-
         doc = App.ActiveDocument
         if not doc:
             self._dirty_sources.clear()
             return
-
         # plocka EN representativ källa
         source = next(iter(self._dirty_sources))
         self._dirty_sources.clear()
@@ -341,7 +314,6 @@ class OBARealtimeObserver:
             doc.recompute()
         except Exception:
             pass
-
         # print("\n flush_körs")
         # 👉 NU är geometrin konsistent
 
@@ -356,6 +328,20 @@ class OBARealtimeObserver:
     # OPTIONAL: deletion (kan förenklas eller tas bort)
     # --------------------------------------------------
 
+    def slotDeletedObject_old(self, obj):
+        if not self.enabled:
+            return
+        doc = App.ActiveDocument
+        if not doc:
+            return
+        # Endast optiskt relevanta objekt
+        if not hasattr(obj, "OpticalType"):
+            return
+        _trigger_ray_engine(
+            reason=f"object_deleted:{obj.Name}",
+            source=obj,
+        )
+
     def slotDeletedObject(self, obj):
         if not self.enabled:
             return
@@ -364,14 +350,24 @@ class OBARealtimeObserver:
         if not doc:
             return
 
-        # Endast optiskt relevanta objekt
-        if not hasattr(obj, "OpticalType"):
-            return
+        # samla alla binder-namn först (för safety)
+        binder_names = []
 
-        _trigger_ray_engine(
-            reason=f"object_deleted:{obj.Name}",
-            source=obj,
-        )
+        if hasattr(obj, "Binders"):
+            binder_names = [b.Name for b in obj.Binders if b]
+
+        for name in binder_names:
+            if doc.getObject(name):
+                try:
+                    doc.removeObject(name)
+                except Exception:
+                    pass
+
+        if hasattr(obj, "OpticalType"):
+            _trigger_ray_engine(
+                reason=f"object_deleted:{obj.Name}",
+                source=obj,
+            )
 
 
 # Säkerställ exakt EN registrerad observer
@@ -392,11 +388,11 @@ class OBAElementProxy:
     Basklass för Mirror / Absorber / Lens etc
     """
 
-    def __init__(self, obj):
+    def __init__(self, obj, use_binders=True):
         obj.Proxy = self
         self.Object = obj
 
-        if not hasattr(obj, "Binders"):
+        if use_binders and not hasattr(obj, "Binders"):
             obj.addProperty("App::PropertyLinkList", "Binders", "Optics", "Länkade ytor")
 
     def onChanged(self, obj, prop):
@@ -425,6 +421,18 @@ class OBAElementProxy:
         #     return
 
         _trigger_ray_engine(f"Property changed: {obj.Name}.{prop}", obj)
+
+    # def onDelete(self, obj, subelements):
+    #     doc = obj.Document
+    #     if not doc:
+    #         return True
+    #     for b in list(getattr(obj, "Binders", [])):
+    #         if b:
+    #             try:
+    #                 doc.removeObject(b.Name)
+    #             except Exception:
+    #                 pass
+    #     return True
 
     def add_binders(self, obj, source_obj, sub_elements):
         """
@@ -497,33 +505,14 @@ class OBAElementProxy:
         # --------------------------------------------------
         self._update_label_from_binders(obj)
 
-    def add_binders_old(self, obj, source_obj, sub_elements):
-        if not source_obj:
+    def clear_binders(self, obj):
+        """Rensa alla binder-objekt"""
+        if not hasattr(obj, "Group"):
             return
 
-        doc = obj.Document
-        actual = doc.getObject(source_obj) if isinstance(source_obj, str) else source_obj
-
-        targets = [(sub,) for sub in sub_elements] if sub_elements else [("",)]
-        current = list(obj.Binders)
-
-        for target in targets:
-            label = target[0] if target[0] else "Body"
-            name = f"Binder_{actual.Name}_{label.replace('.', '_')}_{len(current)}"
-            if doc.getObject(name):
-                name += "_new"
-
-            b = doc.addObject("PartDesign::ShapeBinder", name)
-            print(b.TypeId)
-
-            b.Support = [(actual, target)]
-            b.TraceSupport = True
-            b.ViewObject.Visibility = False
-
-            obj.addObject(b)
-            current.append(b)
-
-        obj.Binders = current
+        to_remove = [o for o in obj.Group if o.Name.startswith("Binder")]
+        for o in to_remove:
+            App.ActiveDocument.removeObject(o.Name)
 
     def _get_binder_source_object(self, obj):
         """
@@ -573,6 +562,17 @@ class OBAElementProxy:
         if obj.Label != new_label:
             obj.Label = new_label
 
+    def update_icon(self, obj):
+        """
+        Tvinga uppdatering av ikon i GUI
+        """
+
+        try:
+            if hasattr(obj, "ViewObject") and obj.ViewObject:
+                obj.ViewObject.signalChangeIcon()
+        except Exception:
+            pass
+
     def __getstate__(self):
         return None
 
@@ -597,6 +597,12 @@ class OBAViewProviderBase:
         # Gemensam preview-root (Coin3D)
         # self._preview_root = None
         # self._final_root = None
+
+    # def claimChildren(self):
+    #     obj = self.Object
+    #     if hasattr(obj, "Binders"):
+    #         return obj.Binders
+    #     return []
 
     def attach(self, vobj):
         """Called when ViewProvider is attached to ViewObject."""

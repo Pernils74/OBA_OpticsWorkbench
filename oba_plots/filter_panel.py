@@ -68,9 +68,11 @@ class ClusterHitFilterPanel(QtWidgets.QWidget):
         self._populate()
 
     def get_filter_spec(self):
-        emitters = tuple(self.emitter_list.item(i).text() for i in range(self.emitter_list.count()) if self.emitter_list.item(i).checkState() == QtCore.Qt.Checked)
+        # emitters = tuple(self.emitter_list.item(i).text() for i in range(self.emitter_list.count()) if self.emitter_list.item(i).checkState() == QtCore.Qt.Checked)
+        # objects = tuple(self.object_list.item(i).text() for i in range(self.object_list.count()) if self.object_list.item(i).checkState() == QtCore.Qt.Checked)
 
-        objects = tuple(self.object_list.item(i).text() for i in range(self.object_list.count()) if self.object_list.item(i).checkState() == QtCore.Qt.Checked)
+        emitters = tuple(self.emitter_list.item(i).data(QtCore.Qt.UserRole) for i in range(self.emitter_list.count()) if self.emitter_list.item(i).checkState() == QtCore.Qt.Checked)
+        objects = tuple(self.object_list.item(i).data(QtCore.Qt.UserRole) for i in range(self.object_list.count()) if self.object_list.item(i).checkState() == QtCore.Qt.Checked)
 
         return {
             "emitters": emitters,
@@ -110,7 +112,23 @@ class ClusterHitFilterPanel(QtWidgets.QWidget):
         # 🔥 trigga EN redraw efter populate
         self._debounce_timer.start()
 
-    def _add_item(self, listw, text):
+    def _add_item(self, listw, name):
+        import FreeCAD as App
+
+        doc = App.ActiveDocument
+        obj = doc.getObject(name)
+
+        label = obj.Label if obj else name
+        item = QtWidgets.QListWidgetItem(label)
+        # ✅ lagra original Name
+        item.setData(QtCore.Qt.UserRole, name)
+
+        item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable)
+        item.setCheckState(QtCore.Qt.Checked)
+
+        listw.addItem(item)
+
+    def _add_item_old(self, listw, text):
         item = QtWidgets.QListWidgetItem(text)
         item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable)
         item.setCheckState(QtCore.Qt.Checked)
@@ -135,8 +153,8 @@ class ClusterHitFilterPanel(QtWidgets.QWidget):
     # -------------------------------------------------
     def _update_object_states(self):
         self._updating = True
-
-        selected_emitters = {self.emitter_list.item(i).text() for i in range(self.emitter_list.count()) if self.emitter_list.item(i).checkState() == QtCore.Qt.Checked}
+        # selected_emitters = {self.emitter_list.item(i).text() for i in range(self.emitter_list.count()) if self.emitter_list.item(i).checkState() == QtCore.Qt.Checked}
+        selected_emitters = {self.emitter_list.item(i).data(QtCore.Qt.UserRole) for i in range(self.emitter_list.count()) if self.emitter_list.item(i).checkState() == QtCore.Qt.Checked}
 
         valid_objects = set()
         for e in selected_emitters:
@@ -144,7 +162,8 @@ class ClusterHitFilterPanel(QtWidgets.QWidget):
 
         for i in range(self.object_list.count()):
             item = self.object_list.item(i)
-            obj = item.text()
+            # obj = item.text()
+            obj = item.data(QtCore.Qt.UserRole)
 
             if obj in valid_objects:
                 item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable)

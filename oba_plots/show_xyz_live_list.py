@@ -40,21 +40,22 @@ class DocXYZLiveDialog(QtWidgets.QDialog):
         root.addLayout(top)
 
         # ---------- TABLE ----------
+
         headers = [
             "X",
             "Y",
             "Z",
             "Hits",
             "Emitter",
-            "Object",
-            "Face",
             "Paths",
+            "Faces",
+            "Path Count",
             "Min Bounce",
             "Max Bounce",
             "Mean Bounce",
-            "Power Σ",
-            "Power In Σ",
-            "Power Out Σ",
+            "Absorbed Σ",  # ✅
+            "Power In Σ",  # ✅
+            "Power Out Σ",  # ✅
         ]
 
         self.tbl = QtWidgets.QTableWidget()
@@ -113,7 +114,6 @@ class DocXYZLiveDialog(QtWidgets.QDialog):
         allowed_emitters = set(filter_spec["emitters"])
         allowed_objects = set(filter_spec["objects"])
 
-        # key = (object, point)
         accum = {}
 
         for h in hits:
@@ -126,7 +126,7 @@ class DocXYZLiveDialog(QtWidgets.QDialog):
                 continue
 
             pt = h["point"]
-            key = (obj, pt)
+            key = (obj, tuple(pt))  # ✅ tuple för säker dict-key
 
             if key not in accum:
                 accum[key] = {
@@ -138,21 +138,23 @@ class DocXYZLiveDialog(QtWidgets.QDialog):
                     "faces": set(),
                     "paths": set(),
                     "bounces": [],
-                    "power": 0.0,
+                    # ✅ energi
                     "power_in": 0.0,
                     "power_out": 0.0,
+                    "absorbed": 0.0,
                 }
 
             a = accum[key]
             a["hits"] += 1
             a["emitters"].add(emitter)
-            a["faces"].add(h["face"])
+            a["faces"].add(h["last_hit_label"])
             a["paths"].add(tuple(h["path_signature"]))
             a["bounces"].append(h["bounce"])
 
-            a["power"] += h["power_out"]
-            a["power_in"] += h.get("power_in") or 0.0
-            a["power_out"] += h["power_out"]
+            # ✅ korrekt energibokföring
+            a["power_in"] += h.get("power_in", 0.0) or 0.0
+            a["power_out"] += h.get("power_out", 0.0) or 0.0
+            a["absorbed"] += h.get("absorbed_power", 0.0) or 0.0
 
         # ---------- Fill table ----------
         self.tbl.setSortingEnabled(False)
@@ -164,9 +166,9 @@ class DocXYZLiveDialog(QtWidgets.QDialog):
             self.tbl.setItem(row, 2, self._num(a["z"]))
             self.tbl.setItem(row, 3, self._num(a["hits"]))
 
-            self.tbl.setItem(row, 4, QtWidgets.QTableWidgetItem(", ".join(map(str, a["emitters"]))))
+            self.tbl.setItem(row, 4, QtWidgets.QTableWidgetItem(", ".join(sorted(a["emitters"]))))
             self.tbl.setItem(row, 5, QtWidgets.QTableWidgetItem(str(len(a["paths"]))))
-            self.tbl.setItem(row, 6, QtWidgets.QTableWidgetItem(", ".join(map(str, a["faces"]))))
+            self.tbl.setItem(row, 6, QtWidgets.QTableWidgetItem(", ".join(sorted(map(str, a["faces"])))))
 
             bs = a["bounces"]
             self.tbl.setItem(row, 7, self._num(len(a["paths"])))
@@ -174,12 +176,14 @@ class DocXYZLiveDialog(QtWidgets.QDialog):
             self.tbl.setItem(row, 9, self._num(max(bs)))
             self.tbl.setItem(row, 10, self._num(sum(bs) / len(bs)))
 
-            self.tbl.setItem(row, 11, self._num(a["power"]))
+            # ✅ NU MENINGSFULLA energikolumner
+            self.tbl.setItem(row, 11, self._num(a["absorbed"]))
             self.tbl.setItem(row, 12, self._num(a["power_in"]))
             self.tbl.setItem(row, 13, self._num(a["power_out"]))
 
         self.tbl.setSortingEnabled(True)
-        self.lblStatus.setText(f"Punkter: {len(accum)} | Hits: {sum(a['hits'] for a in accum.values())}")
+
+        self.lblStatus.setText(f"Punkter: {len(accum)} | " f"Hits: {sum(a['hits'] for a in accum.values())}")
 
     # ------------------------------------------------------------
     def _num(self, v):

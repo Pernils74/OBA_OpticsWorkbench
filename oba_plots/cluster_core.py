@@ -226,7 +226,12 @@ def build_bounce_flow_legend(ax, clusters, mixer):
     handles = []
     labels = []
 
-    for (bounce, prev), data in sorted(combo.items()):
+    def sort_key(item):
+        (bounce, prev), _ = item
+        prev_key = "" if prev is None else str(prev)
+        return (bounce, prev_key)
+
+    for (bounce, prev), data in sorted(combo.items(), key=sort_key):
         hits = data["hits"]
         power = data["power"]
 
@@ -247,7 +252,6 @@ def build_bounce_flow_legend(ax, clusters, mixer):
             )
         )
 
-        # labels.append(f"B{bounce} | {prev_str} " f"({hits} hits, {hits_pct:.1f}%, " f"P={power:.2f}, {power_pct:.1f}%)")
         labels.append(f"B{bounce} |  " f"({hits} hits, {hits_pct:.1f}%, " f"P={power:.2f}, {power_pct:.1f}%)")
 
     ax.legend(

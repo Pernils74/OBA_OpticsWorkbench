@@ -10,6 +10,17 @@ from .oba_base import OBABaseDialog, OBAElementProxy, OBAViewProviderBase  # , r
 # ============================================================
 
 
+OPTICAL_PROPERTIES = [
+    {
+        "name": "Absorption",
+        "type": "App::PropertyFloat",
+        "group": "Absorber",
+        "default": 1.0,
+        "doc": "Absorptionsgrad",
+    }
+]
+
+
 class OBAAbsorber(OBAElementProxy):
 
     def __init__(self, obj, source_obj=None, sub_elements=None):
@@ -17,8 +28,14 @@ class OBAAbsorber(OBAElementProxy):
         super().__init__(obj)
 
         # Absorber-specifik property
-        if not hasattr(obj, "Absorption"):
-            obj.addProperty("App::PropertyFloat", "Absorption", "Absorber", "Absorptionsgrad").Absorption = 1.00
+        for p in OPTICAL_PROPERTIES:
+            if not hasattr(obj, p["name"]):
+                obj.addProperty(p["type"], p["name"], p["group"], p.get("doc", ""))
+                setattr(obj, p["name"], p["default"])
+
+        # # Absorber-specifik property
+        # if not hasattr(obj, "Absorption"):
+        #     obj.addProperty("App::PropertyFloat", "Absorption", "Absorber", "Absorptionsgrad").Absorption = 1.00
 
         # OpticalType (styr ikon via basen)
         if not hasattr(obj, "OpticalType"):
@@ -30,7 +47,7 @@ class OBAAbsorber(OBAElementProxy):
             self.add_binders(obj, source_obj, sub_elements)
 
     def onDocumentRestored(self, obj):
-        """Återställer logik och GUI-koppling vid laddning"""
+        """Återställer logik utan att skapa serialiseringsproblem"""
         obj.Proxy = self
         self.Object = obj
         App.Console.PrintMessage(f"Restoring {obj.Label}\n")
@@ -67,8 +84,8 @@ class AbsorberDialog(OBABaseDialog):
         row.addWidget(QtWidgets.QLabel("Absorption:"))
 
         self.spin_abs = QtWidgets.QDoubleSpinBox()
-        self.spin_abs.setRange(0.0, 1.0)
-        self.spin_abs.setSingleStep(0.01)
+        self.spin_abs.setRange(0.00, 1.00)
+        self.spin_abs.setSingleStep(0.05)
         self.spin_abs.setValue(self.obj.Absorption)
         self.spin_abs.valueChanged.connect(self._update_absorption)
 
@@ -120,10 +137,9 @@ def OBA_CreateAbsorber(show_dialog=True):
     doc.recompute()
 
     # Visa dialog direkt
-
-    # Visa dialog direkt
     if show_dialog:
         AbsorberDialog(absorber_obj).show()
+
     # AbsorberDialog(absorber_obj).show()
 
     return absorber_obj
