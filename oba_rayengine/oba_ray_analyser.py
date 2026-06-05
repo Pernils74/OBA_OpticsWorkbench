@@ -13,7 +13,7 @@ Ray analysis built on OBARayManager singleton.
 import math
 import numpy as np
 
-from OPTIMIZER.optimize_scoring import roundness_score_from_cov
+
 from .oba_ray_core import OBARayManager
 from collections import defaultdict
 
