@@ -1,4 +1,4 @@
-# OBA Opticsworkbench v 0.6.2
+# OBA Opticsworkbench v 0.6.3
 
 ---
 
@@ -91,6 +91,10 @@ Dedicated forum thread for this bench can be found here: https://forum.freecad.o
 
 - Added more metrics in power vs hit plot.
 - Fixed broken logger in the public version
+
+### Version 0.6.3
+
+- Added D-shape in object builder
 
 # 🔧 Installation
 
